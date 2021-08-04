@@ -1,0 +1,64 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.34.4.
+--
+-- see: https://github.com/sol/hpack
+
+name:           tetrhs
+version:        0.1.0.0
+description:    Simple tetris bot
+homepage:       https://github.com/Trebor-Huang/tetrhs#readme
+bug-reports:    https://github.com/Trebor-Huang/tetrhs/issues
+author:         Trebor
+maintainer:     treborhuang@foxmail/com
+copyright:      2021 Trebor
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/Trebor-Huang/tetrhs
+
+library
+  exposed-modules:
+      Board
+      Lib
+  other-modules:
+      Paths_tetrhs
+  hs-source-dirs:
+      src
+  build-depends:
+      array >=0.5
+    , base >=4.7 && <5
+  default-language: Haskell2010
+
+executable tetrhs-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_tetrhs
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      array >=0.5
+    , base >=4.7 && <5
+    , tetrhs
+  default-language: Haskell2010
+
+test-suite tetrhs-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_tetrhs
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      array >=0.5
+    , base >=4.7 && <5
+    , tetrhs
+  default-language: Haskell2010
