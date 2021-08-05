@@ -22,6 +22,9 @@ description:         Simple tetris bot
 dependencies:
 - base >= 4.7 && < 5
 - array >= 0.5
+- lens >= 4.0
+- monad-loops >= 0.4
+- mtl >= 2.2
 
 library:
   source-dirs: src

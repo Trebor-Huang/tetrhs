@@ -1,0 +1,13 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "tetrhs:lib"
+
+    - path: "./app/Main.hs"
+      component: "tetrhs:exe:tetrhs-exe"
+
+    - path: "./app/Paths_tetrhs.hs"
+      component: "tetrhs:exe:tetrhs-exe"
+
+    - path: "./test"
+      component: "tetrhs:test:tetrhs-test"
