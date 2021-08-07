@@ -31,7 +31,7 @@ printBoard = do
     r <- liftIO q      -- Computes the String
     liftIO $ putStrLn r  -- prints the string
     liftIO $ putStrLn "----------------"
-    liftIO $ threadDelay 500000
+    liftIO $ threadDelay 300000
 
 -- ! Test 2
 operate :: IO ((), Board IOArray Array IO)
@@ -40,6 +40,7 @@ operate = runStateT (do
             id %= spawnPiece PieceZ ((3,20), 0),
             moveState MLeft,
             moveState MDown,
+            moveState MSoft,
             lockState,
             id %= spawnPiece PieceT ((5,20), 0),
             moveState MRRight,
@@ -84,9 +85,5 @@ findRoute = bfsRoute ((0,0), (11,11)) grid (0,0)
 
 main :: IO ()
 main = do
-    defaultMain
-        [
-            bench "grid" $ whnf findRoute (5,5),
-            bench "grid" $ whnf findRoute (10,6)
-        ]
+    invertTest
     return ()

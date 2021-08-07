@@ -255,7 +255,9 @@ lock b = do
 
 lockState :: BoardConstraint ma ia m => StateT (Board ma ia m) m ()
 lockState = do
-    gets lock
+    b <- gets lock
+    b' <- lift b
+    put b'
     return ()
 
 -- Inverts a move, ignoring no-ops. This is used for finesse searching
@@ -269,7 +271,7 @@ invertMove :: (IArray a Bool, IArray ia Position)
             -> [(Position, Rotation)]
 invertMove fb sz kt pc st mv = filter
     -- we filter the candidates by requiring that invertMove is really an inversion
-    (\state -> (st, True) == computeMove fb sz kt pc st mv) $
+    (\state -> (st, True) == computeMove fb sz kt pc state mv) $
     _invertMove fb sz kt pc st mv
 
 -- returns a list of candidates
