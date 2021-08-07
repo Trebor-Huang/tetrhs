@@ -1,10 +1,11 @@
+{-# LANGUAGE FlexibleContexts #-}
 import Board
 import ArrayData
 import SearchAlgorithms
 import Data.Array.IO
 import Data.Array.IArray
 import Data.List
-import Data.Time
+import Criterion.Main
 import Control.Lens
 import Control.Monad.State
 import Control.Concurrent
@@ -36,11 +37,11 @@ printBoard = do
 operate :: IO ((), Board IOArray Array IO)
 operate = runStateT (do
     sequence_ $ intersperse printBoard [
-            id %= spawnPiece PieceZ (3,20) 0,
+            id %= spawnPiece PieceZ ((3,20), 0),
             moveState MLeft,
             moveState MDown,
-            moveState MHard,
-            id %= spawnPiece PieceT (5,20) 0,
+            lockState,
+            id %= spawnPiece PieceT ((5,20), 0),
             moveState MRRight,
             moveState MDASLeft,
             moveState MSoft,
@@ -64,14 +65,28 @@ weird _ 0 = 0
 weird _ 1 = 0
 weird f i = f (i - 2) + f (i - 1) + 1
 
-naiveweird = weird naiveweird
 stweird n = memoST (0,n) weird n
-memoweird n = memo (0,n) weird n
-arrayweird n = memoArray (0,n) weird n
+
+-- ! Test 5
+invertTest = do
+    ((), board) <- operate
+    m <- invertMoveBoard board MRLeft
+    print m
+
+-- ! Test 6
+grid :: Position -> [(Bool, Position)]
+grid (x,y) | x > 10 && y > 10 = []
+           | x > 10 = [(False, (x,y+1))]
+           | y > 10 = [(True, (x+1,y))]
+           | otherwise = [(False, (x,y+1)), (True, (x+1,y))]
+
+findRoute = bfsRoute ((0,0), (11,11)) grid (0,0)
 
 main :: IO ()
 main = do
-    ((), board) <- operate
-    m <- invertMove MRLeft board
-    print m
+    defaultMain
+        [
+            bench "grid" $ whnf findRoute (5,5),
+            bench "grid" $ whnf findRoute (10,6)
+        ]
     return ()

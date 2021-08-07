@@ -1,5 +1,6 @@
-{-# LANGUAGE FlexibleContexts, ConstraintKinds, RankNTypes #-}
+{-# LANGUAGE FlexibleContexts, ConstraintKinds, RankNTypes, ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 module Board where
 
 import Control.Lens
@@ -7,9 +8,11 @@ import Control.Monad
 import Control.Monad.Loops
 import Control.Monad.State
 import Data.Array.IArray
-import Data.Array.ST
+import Data.Array.MArray
 import Data.List (intercalate)
 import Data.Maybe (fromJust)
+-- A convenient helper function to format and log
+-- usage : formatter `lg` object
 import System.IO.Unsafe (unsafePerformIO)
 lg f a = unsafePerformIO (print (f a)) `seq` a
 
@@ -139,41 +142,43 @@ showBoard b = do
                 let bds = bounds psh in
                 inRange bds relpos && (psh ! relpos)
 
-data Move = MHard | MLeft | MRight | MDown | MSoft | MDASLeft | MDASRight | MRLeft | MRRight | MRFlip
+data Move = MLeft | MRight | MDown | MSoft | MDASLeft | MDASRight | MRLeft | MRRight | MRFlip
     deriving (Eq, Show, Enum, Ord, Ix, Read)
 
-validPosition :: (MArray a Bool m)
+validPosition :: (IArray a Bool)
               => (Int, Int)  -- size
-              -> m (a Position Bool)  -- field
+              -> a Position Bool  -- frozen field
               -> Piece
-              -> Rotation
-              -> Position
-              -> m Bool
-validPosition s b p r (x0, y0) = do
-    array <- b
-    andM $ map -- for all the blocks in the range below
-        (\(x, y) ->
-            if not (pieceShape p r ! (x, y)) then  -- It's fine if the block is not occupied
-                return True
-            else if inRange ((0,0), s & both %~ pred) (x+x0, y+y0) then  -- cannot crash with occupied blocks in field
-                not <$> readArray array (x+x0, y+y0)
-            else  -- It is out of bounds
-                return False)
-        (range $ bounds $ pieceShape p r)  -- the range is the bounding box of the tetrimino
+              -> (Position, Rotation)
+              -> Bool
+validPosition s f p ((x0, y0),r) = all
+    (\(x, y)
+        -> not (pieceShape p r ! (x, y)) ||  -- It's fine if the block is not occupied
+            (inRange ((0,0), s & both %~ pred) (x+x0, y+y0) &&  -- If it is, it can't go out of bound
+                not (f ! (x+x0, y+y0))))  -- and it cannot crash with the field
+    (range $ bounds $ pieceShape p r)
 
-validBoardPosition :: BoardConstraint ma ia m => Board ma ia m -> m Bool
-validBoardPosition b = validPosition (fieldSize b) (b^.field) (b^.piece) (b^.pieceRotation) (b^.piecePosition)
+validBoardPosition :: forall ma ia m. (BoardConstraint ma ia m) => Board ma ia m -> m Bool
+validBoardPosition b = do
+    f <- b^.field
+    frozenf <- freeze f :: m (Array Position Bool)
+    return (validPosition (fieldSize b) frozenf (b^.piece) (b^.pieceState))
 
-spawnPiece :: BoardConstraint ma ia m => Piece -> Position -> Rotation -> Board ma ia m -> Board ma ia m
-spawnPiece pc pos rot brd = brd
+spawnPiece :: BoardConstraint ma ia m => Piece -> (Position, Rotation) -> Board ma ia m -> Board ma ia m
+spawnPiece pc s brd = brd
     & piece .~ pc
-    & piecePosition .~ pos
-    & pieceRotation .~ rot
+    & pieceState .~ s
 
-computeMove :: BoardConstraint ma ia m => Move -> Board ma ia m -> m ((Position, Rotation), Bool)
-computeMove m b = do
+computeMove :: (IArray a Bool, IArray ia Position)
+            => a Position Bool  -- frozen board
+            -> (Int, Int) -- Size
+            -> KickTable ia
+            -> Piece
+            -> (Position, Rotation)
+            -> Move
+            -> ((Position, Rotation), Bool)  -- (end state, moved?)
+computeMove fb sz kt pc ((x0, y0), rot) m = do
     case m of
-      MHard -> tryMoves (0,-1)
       MLeft -> tryMove (-1,0)
       MRight -> tryMove (1,0)
       MDown -> tryMove (0,-1)
@@ -185,59 +190,49 @@ computeMove m b = do
       MRFlip -> tryRot 2
 
     where
-        rot = b^.pieceRotation
-        (x0, y0) = b^.piecePosition
         -- input relative change, output resulting absolute state
-        tryMove (x, y) = do
-            let (x1, y1) = (x+x0, y+y0)
-            let b' = b & piecePosition .~ (x1, y1)
-            valid <- validBoardPosition b'
-            if valid then
-                return (((x1, y1), rot), True)
+        tryMove (x, y) = let (x1, y1) = (x+x0, y+y0) in
+            if validPosition sz fb pc ((x1, y1), rot) then
+                (((x1, y1), rot), True)
             else
-                return (((x0, y0), rot), False)
+                (((x0, y0), rot), False)
         -- tries until fails
-        tryMoves (x, y) = pack . pred . fromJust <$> firstM
-            -- after getting the first (head) try that fails,
-            -- (NB: firstM serves as the monadic version of head $ filter,
-            -- since filterM consumes all the input before handing the result to (head <$>))
-            -- we minus one to get the last consecutive try that succeeds
-            -- and wrap that up into an out-of-the-box format
-            ((not <$>) . validBoardPosition . (b &) . (piecePosition .~) . try)
-            -- read that from right to left:
-            --   input n
-            --   compute the coordinate of the n-th try
-            --   a setter of piecePosition to that value
-            --   sets the value of the board b
-            --   see if the result is a valid position
-            --   invert that since we want the first invalid one
+        tryMoves (x, y) = pack . pred . head $ filter
+            -- we get the first invalid position,
+            -- then backtract to get the last consecutive valid one
+            -- and pack the thing up into an out-of-the-box format
+            (not . validPosition sz fb pc . (,rot) . try)
             [1..]
             where
                 try n = (x0 + x * n, y0 + y * n)
                 pack 0 = (((x0, y0), rot), False)
                 pack n = ((try n,    rot), True)
         -- rotation, much the same as moving, but we take the first valid kick, instead of the last
-        tryRot r = let b' = b & pieceRotation .~ ((rot + r) `mod` 4) in
-            pack <$> filterM
-            (validBoardPosition . (b' &) . (piecePosition .~) . try)
+        tryRot r = packhead $ filter
+            (validPosition sz fb pc . (,rot') . try)
             [0..maxn]
             where
-                maxn = (b & kickTable & bounds & snd) ^. _4
-                try n = (b & kickTable) !
-                    (b^.piece, rot, (rot + r) `mod` 4, n) `add` (x0, y0)
-                pack (n:ns) = ((try n, (rot + r) `mod` 4), True)
-                pack [] = (((x0, y0), rot), False)
+                maxn = (kt & bounds & snd) ^. _4
+                rot' = (rot + r) `mod` 4
+                try n = kt !
+                    (pc, rot, rot', n) `add` (x0, y0)
+                packhead (n:ns) = ((try n, (rot + r) `mod` 4), True)
+                packhead [] = (((x0, y0), rot), False)
 
-makeMove :: BoardConstraint ma ia m => Move -> Board ma ia m -> m (Board ma ia m, Bool)
-makeMove m b = do
-    (state, res) <- computeMove m b
-    -- update the board
-    let b' = b & pieceState .~ state
-    -- in two cases we lock the tetrimino piece
-    b'' <- case m of
-        MHard -> lock b'
-        _ -> return b'
-    return (b'', res)
+-- wrapper that packs the data up
+computeMoveBoard :: forall ma ia m. BoardConstraint ma ia m
+                 => Board ma ia m
+                 -> Move
+                 -> m ((Position, Rotation), Bool)
+computeMoveBoard br mv = do
+    fd <- br^.field
+    frz <- freeze fd :: m (Array Position Bool)
+    return $ computeMove frz (fieldSize br) (kickTable br) (br^.piece) (br^.pieceState) mv
+
+makeMoveBoard :: BoardConstraint ma ia m => Move -> Board ma ia m -> m (Board ma ia m, Bool)
+makeMoveBoard m b = do
+    (state, res) <- computeMoveBoard b m
+    return (b & pieceState .~ state, res)
 
 -- locks the tetrimino in-place
 -- doesn't check for anything
@@ -258,18 +253,36 @@ lock b = do
     return $ b & field .~ r
     where psh = pieceShape (b^.piece) (b^.pieceRotation)
 
--- Inverts a move, ignoring no-ops. This is used for finesse searching
-invertMove :: BoardConstraint ma ia m => Move -> Board ma ia m -> m [(Position, Rotation)]
-invertMove m b = do
-    candidates <- _invertMove m b
-    filterM (\state ->
-        ((b^.pieceState, True) ==) <$>  -- it should get the original state back
-            computeMove m  -- when you make a normal move to cancel the inverted move
-                (b & pieceState .~ state)) candidates
+lockState :: BoardConstraint ma ia m => StateT (Board ma ia m) m ()
+lockState = do
+    gets lock
+    return ()
 
-_invertMove :: BoardConstraint ma ia m => Move -> Board ma ia m -> m [(Position, Rotation)]
-_invertMove m b = do
-    case m of
+-- Inverts a move, ignoring no-ops. This is used for finesse searching
+invertMove :: (IArray a Bool, IArray ia Position)
+            => a Position Bool  -- frozen board
+            -> (Int, Int) -- Size
+            -> KickTable ia
+            -> Piece
+            -> (Position, Rotation)
+            -> Move
+            -> [(Position, Rotation)]
+invertMove fb sz kt pc st mv = filter
+    -- we filter the candidates by requiring that invertMove is really an inversion
+    (\state -> (st, True) == computeMove fb sz kt pc st mv) $
+    _invertMove fb sz kt pc st mv
+
+-- returns a list of candidates
+_invertMove :: (IArray a Bool, IArray ia Position)
+            => a Position Bool  -- frozen board
+            -> (Int, Int) -- Size
+            -> KickTable ia
+            -> Piece
+            -> (Position, Rotation)
+            -> Move
+            -> [(Position, Rotation)]
+_invertMove fb sz kt pc ((x0, y0), rot) mv =
+    case mv of
       MLeft -> tryMove (-1,0)
       MRight -> tryMove (1,0)
       MDown -> tryMove (0,-1)
@@ -279,40 +292,41 @@ _invertMove m b = do
       MRLeft -> tryRot 3
       MRRight -> tryRot 1
       MRFlip -> tryRot 2
-      m -> error $ "It doesn't make sense to invert " ++ show m
-
     where
-        rot = b^.pieceRotation
-        (x0, y0) = b^.piecePosition
-        -- input relative change, output resulting absolute state
-        tryMove (x, y) = do
-            let (x1, y1) = (x0-x,y0-y)
-            let b' = b & piecePosition .~ (x1, y1)
-            valid <- validBoardPosition b'
-            if valid then
-                return [((x1, y1), rot)]
-            else
-                return []
-        -- generates all the possibilities
-        tryMoves (x, y) = map pack <$> takeWhileM
-            (validBoardPosition . (b &) . (piecePosition .~) . try)
+        -- ignores no-ops
+        tryMove (x, y) = let (x1, y1) = (x-x0, y-y0) in
+            [((x1, y1), rot) | validPosition sz fb pc ((x1, y1), rot)]
+        -- checks consecutive moves
+        tryMoves (x, y) = map pack $ takeWhile
+            (validPosition sz fb pc . (,rot) . try)
             [1..]
             where
                 try n = (x0 - x * n, y0 - y * n)
                 pack n = (try n, rot)
         -- rotation, we don't check but returns a list of candidates
-        tryRot r = let b' = b & pieceRotation .~ ((rot - r) `mod` 4) in
-            map pack <$> filterM
-            (validBoardPosition . (b' &) . (piecePosition .~) . try)
+        tryRot r = map pack $ filter
+            (validPosition sz fb pc . (,rot) . try)
             [0..maxn]
             where
-                maxn = (b & kickTable & bounds & snd) ^. _4
-                try n = (x0, y0) `sub` ((b & kickTable) !
-                    (b^.piece, (rot - r) `mod` 4, rot, n))
-                pack n = (try n, (rot - r) `mod` 4)
+                rot' = (rot - r) `mod` 4
+                maxn = (kt & bounds & snd) ^. _4
+                try n = (x0, y0) `sub`
+                    (kt ! (pc, rot', rot, n))
+                pack n = (try n, rot')
 
+invertMoveBoard  :: forall ma ia m. BoardConstraint ma ia m
+                 => Board ma ia m
+                 -> Move
+                 -> m [(Position, Rotation)]
+invertMoveBoard br mv = do
+    fd <- br^.field
+    frz <- freeze fd :: m (Array Position Bool)
+    return $ invertMove frz (fieldSize br) (kickTable br) (br^.piece) (br^.pieceState) mv
+
+
+-- Conveniently packs this up into a StateT
 moveState :: BoardConstraint ma ia m => Move -> StateT (Board ma ia m) m ()
-moveState m = join $ gets (put <=< lift . (fst <$>) . makeMove m)
+moveState m = join $ gets (put <=< lift . (fst <$>) . makeMoveBoard m)
 
 -- I'd really like to see somebody obfuscate this with lens!
 add (x, y) (u, v) = (x+u, y+v)

@@ -52,4 +52,4 @@ tests:
     - -O2
     dependencies:
     - tetrhs
-    - time
+    - criterion
