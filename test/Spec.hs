@@ -97,7 +97,6 @@ findRoute = bfsRoute ((0,0), (11,11)) grid (0,0)
 searchTest :: [((Position, Rotation), Bool)] -> [Maybe [Move]]
 searchTest = map (searchFinesse
         frozenBoard
-        (10,40)
         ((-2,-2),(9,21))
         (srs :: KickTable Array)
         standardMoves
@@ -110,11 +109,11 @@ usefulFinesse :: (Piece, Piece) -> [(Piece, (Position, Rotation), [Move])]
 usefulFinesse (minBound, maxBound) =
     [ (pc, (pos, rot), moves) |
         pc <- range (minBound, maxBound),
-        let srch = searchFinesse frozenBoard (10,40) ((-2,-2), (9,21)) (srs::KickTable Array) standardMoves
+        let srch = searchFinesse frozenBoard ((-2,-2), (9,21)) (srs::KickTable Array) standardMoves
                 pc (guideLineSpawnPositions!pc,0),
         pos <- range ((-2,-2),(9,0)),
         rot <- [0,1,2,3],
-        validPosition (10,40) frozenBoard pc (pos, rot),
+        validPosition frozenBoard pc (pos, rot),
         let result = srch ((pos, rot), True),
         endsWithSoftDrop result,
         let (Just moves) = result]
@@ -143,7 +142,6 @@ zspinBoard = listArray ((0,0), (9,9))  -- 10x10, rotated
 testAllPlacements :: Piece -> Map ((Position, Rotation), Bool) [Move]
 testAllPlacements pc = allPlacements
     zspinBoard
-    (10,10)
     ((-2,-2),(10,10))
     (srs :: KickTable Array)
     standardMoves

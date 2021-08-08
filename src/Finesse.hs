@@ -9,8 +9,7 @@ import Control.Lens
 import Data.Maybe
 
 searchFinesse :: (IArray a Bool, IArray ia Position)
-            => a Position Bool  -- frozen board
-            -> (Int, Int) -- Size
+            => FrozenField a -- frozen field
             -> (Position, Position) -- safe region
             -> KickTable ia
             -> [Move] -- available moves
@@ -18,34 +17,33 @@ searchFinesse :: (IArray a Bool, IArray ia Position)
             -> (Position, Rotation) -- start state
             -> ((Position, Rotation), Bool) -- end state, lock?
             -> Maybe [Move]
-searchFinesse fb sz sr kt mv pc st
+searchFinesse fb sr kt mv pc st
     = bfsRoute (((sr^._1, 0), False), ((sr^._2, 3), True))
         (\(s, locked) -> [ (m, (s', locked')) |
             not locked,
             m <- mv,
-            let (s', b) = computeMove fb sz kt pc s m,
+            let (s', b) = computeMove fb kt pc s m,
             locked' <- if m == MSoft then [True, False] else [False],
             b || locked']) (st, False)
 
 standardMoves = [MRLeft, MRRight, MDASLeft, MDASRight, MLeft, MRight, MSoft, MDown]
 
 allPlacements :: (IArray a Bool, IArray ia Position)
-            => a Position Bool  -- frozen board
-            -> (Int, Int) -- Size
+            => FrozenField a -- frozen field
             -> (Position, Position) -- safe region
             -> KickTable ia
             -> [Move] -- available moves
             -> Piece
             -> (Position, Rotation) -- start state
             -> Map.Map ((Position, Rotation), Bool) [Move]
-allPlacements fb sz sr kt mv pc st =
+allPlacements fb sr kt mv pc st =
     let srch = bfsRouteArray
             (((sr^._1, 0), False), ((sr^._2, 3), True))
             (\(s, locked)
                 -> [(m, (s', locked')) |
                     not locked,
                     m <- mv,
-                    let (s', b) = computeMove fb sz kt pc s m,
+                    let (s', b) = computeMove fb kt pc s m,
                     locked' <- if m == MSoft then [True, False] else [False],
                     b || locked'])
             (st, False) in
