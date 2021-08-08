@@ -2,6 +2,7 @@
 import Board
 import ArrayData
 import SearchAlgorithms
+import Finesse
 import Data.Array.IO
 import Data.Array.IArray
 import Data.List
@@ -83,7 +84,23 @@ grid (x,y) | x > 10 && y > 10 = []
 
 findRoute = bfsRoute ((0,0), (11,11)) grid (0,0)
 
+-- ! Test 7
+
+searchTest :: (Position, Rotation) -> IO ()
+searchTest s = do
+    f <- board^.field
+    fb <- freeze f :: IO (Array Position Bool)
+    print (searchFinesse
+        fb
+        (fieldSize board)
+        ((-2,-1),(9,21))
+        (kickTable board)
+        standardMoves
+        PieceZ
+        ((4,20),0)
+        ((3,0),3))
+
 main :: IO ()
 main = do
-    invertTest
+    searchTest ((1,1),0)
     return ()

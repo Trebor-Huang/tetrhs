@@ -53,7 +53,7 @@ bfsRoute :: forall a c. (Ix a)
     => (a, a)  -- on a range of vertices of type a
     -> (a -> [(c, a)])  -- shows a list of connected vertices, c is the edge type
     -> a -> a -> Maybe [c] -- finds a shortest route between two points
-bfsRoute (!r) f (!a) = trace (Just [])
+bfsRoute (!r) f (!a) = (fetch!)
     where
         unpack n = arr ! n
         arr = runSTArray compute
@@ -77,8 +77,7 @@ bfsRoute (!r) f (!a) = trace (Just [])
                                       Nothing -> do
                                           writeArray array n (Just (a0, c))
                                           return (Just n)
-                                      Just c' -> return Nothing
-                                        ))
+                                      Just c' -> return Nothing))
                     writeSTRef neighref (catMaybes $ join new_neighbours))
             -- now we get a array of (previous node, last-step-taken)
             -- we just need to follow it to build up a complete route
@@ -88,3 +87,4 @@ bfsRoute (!r) f (!a) = trace (Just [])
                             (a',c) <- unpack a1
                             rt <- route
                             trace (Just (c:rt)) a'
+        fetch = listArray r $ map (trace (Just [])) (range r)

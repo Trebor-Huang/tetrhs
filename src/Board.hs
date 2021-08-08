@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts, ConstraintKinds, RankNTypes, ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Board where
 
 import Control.Lens
@@ -14,6 +15,7 @@ import Data.Maybe (fromJust)
 -- A convenient helper function to format and log
 -- usage : formatter `lg` object
 import System.IO.Unsafe (unsafePerformIO)
+import GHC.Generics
 lg f a = unsafePerformIO (print (f a)) `seq` a
 
 data Piece
@@ -26,7 +28,7 @@ data Piece
     | PieceO
     | PieceI
     -- subject to extension
-    deriving (Eq, Show, Enum, Ord, Ix, Read, Bounded)
+    deriving (Eq, Show, Enum, Ord, Ix, Read, Bounded, Generic)
 type Rotation = Int  -- Clockwise
 type Position = (Int, Int) -- origin at bottom left
 
@@ -143,7 +145,7 @@ showBoard b = do
                 inRange bds relpos && (psh ! relpos)
 
 data Move = MLeft | MRight | MDown | MSoft | MDASLeft | MDASRight | MRLeft | MRRight | MRFlip
-    deriving (Eq, Show, Enum, Ord, Ix, Read)
+    deriving (Eq, Show, Enum, Ord, Ix, Read, Bounded, Generic)
 
 validPosition :: (IArray a Bool)
               => (Int, Int)  -- size
