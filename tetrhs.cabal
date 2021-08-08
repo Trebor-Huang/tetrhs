@@ -29,6 +29,7 @@ library
       Board
       Finesse
       Lib
+      PCFinder
       SearchAlgorithms
   other-modules:
       Paths_tetrhs

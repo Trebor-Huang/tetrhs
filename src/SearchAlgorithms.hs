@@ -61,7 +61,7 @@ bfsRouteArray (!r) f (!a) = fetch
                             let nodes = f a0  -- get the connected nodes
                             forM
                                 nodes
-                                (\(c, n) -> do
+                                (\(c, n) -> do 
                                     r <- readArray array n
                                     case r of
                                       Nothing -> do

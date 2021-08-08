@@ -2,21 +2,21 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE KindSignatures #-}
 module Board where
 
-import Control.Lens
+import Control.Lens hiding (indices)
 import Control.Monad
-import Control.Monad.Loops
 import Control.Monad.State
 import Data.Array.IArray
 import Data.Array.MArray
-import Data.List (intercalate)
-import Data.Maybe (fromJust)
+import Data.List
+import GHC.Generics
 -- A convenient helper function to format and log
 -- usage : formatter `lg` object
 import System.IO.Unsafe (unsafePerformIO)
-import GHC.Generics
-lg f a = unsafePerformIO (print (f a)) `seq` a
+--lg f a = unsafePerformIO (print (f a)) `seq` a
+--(!?) x y = if inRange (bounds x) y then x!y else error $ "Out of bounds: " ++ show y
 
 data Piece
     = PieceEmpty
@@ -90,8 +90,8 @@ pieceShape _ _ = error "Rotation state out of bound. You should `mod` 4 before p
 type KickTable a = a (Piece, Rotation, Rotation, Int) (Int, Int)
 
 type BoardConstraint ma ia m = (MArray ma Bool m, IArray ia Position)
-data Board ma ia m = Board {
-    _field :: !(m (ma Position Bool)),  -- Bool array of occupation, origin at bottom-left
+data Board ma ia (m :: * -> *) = Board {
+    _field :: !(ma Position Bool),  -- Bool array of occupation, origin at bottom-left
     _piece :: !Piece,
     _piecePosition :: Position,
     _pieceRotation :: Rotation,
@@ -111,9 +111,11 @@ pieceState = lens
     (\b -> (b^.piecePosition, b^.pieceRotation))
     (\b (p, r) -> b & piecePosition .~ p & pieceRotation .~ r)
 
-emptyBoard :: BoardConstraint ma ia m => Int -> KickTable ia -> (Int, Int) -> Board ma ia m
-emptyBoard spawnLine kickTable fieldSize@(x, y) = Board {
-        _field = newArray ((0,0), (x-1,y-1)) False,
+emptyBoard :: BoardConstraint ma ia m => Int -> KickTable ia -> (Int, Int) -> m (Board ma ia m)
+emptyBoard spawnLine kickTable fieldSize@(x, y) = do
+    arr <- newArray ((0,0), (x-1,y-1)) False
+    return Board {
+        _field = arr,
         _piece = PieceEmpty,
         _piecePosition = (0,0),
         _pieceRotation = 0,
@@ -126,9 +128,17 @@ emptyBoard spawnLine kickTable fieldSize@(x, y) = Board {
         fieldSize = fieldSize
     }
 
+showField :: IArray ia Bool => ia Position Bool -> String
+showField f = intercalate "\n" $
+    [concat [if f!(x,y) then "[]" else "  " | x <- [0..xmax]] | y <- [ymax,ymax-1..0]]
+    where
+        (xmax, ymax) = snd $ bounds f
+
+
+-- TODO make this look better
 showBoard :: BoardConstraint ma ia m => Board ma ia m -> m String
 showBoard b = do
-    array <- b^.field
+    let array = b^.field
     let (xmax, ymax) = fieldSize b
     intercalate "\n" <$> mapM sequence
         [[xo <$> readArray array (x, y) <*> return (shadow x y) | x <- [0..xmax-1]] | y <- [ymax-1,ymax-2..0]]
@@ -142,7 +152,7 @@ showBoard b = do
                 let relpos = (x-x0, y-y0) in
                 let psh = pieceShape (b^.piece) (b^.pieceRotation) in
                 let bds = bounds psh in
-                inRange bds relpos && (psh ! relpos)
+                inRange bds relpos && psh ! relpos
 
 data Move = MLeft | MRight | MDown | MSoft | MDASLeft | MDASRight | MRLeft | MRRight | MRFlip
     deriving (Eq, Show, Enum, Ord, Ix, Read, Bounded, Generic)
@@ -156,14 +166,14 @@ validPosition :: (IArray a Bool)
 validPosition s f p ((x0, y0),r) = all
     (\(x, y)
         -> not (pieceShape p r ! (x, y)) ||  -- It's fine if the block is not occupied
-            (inRange ((0,0), s & both %~ pred) (x+x0, y+y0) &&  -- If it is, it can't go out of bound
-                not (f ! (x+x0, y+y0))))  -- and it cannot crash with the field
-    (range $ bounds $ pieceShape p r)
+            inRange (bounds f) (x+x0, y+y0) &&  -- If it is, it can't go out of bound
+                not (f ! (x+x0, y+y0)))  -- and it cannot crash with the field
+    (indices $ pieceShape p r)
+
 
 validBoardPosition :: forall ma ia m. (BoardConstraint ma ia m) => Board ma ia m -> m Bool
 validBoardPosition b = do
-    f <- b^.field
-    frozenf <- freeze f :: m (Array Position Bool)
+    frozenf <- freeze (b^.field) :: m (Array Position Bool)
     return (validPosition (fieldSize b) frozenf (b^.piece) (b^.pieceState))
 
 spawnPiece :: BoardConstraint ma ia m => Piece -> (Position, Rotation) -> Board ma ia m -> Board ma ia m
@@ -227,8 +237,7 @@ computeMoveBoard :: forall ma ia m. BoardConstraint ma ia m
                  -> Move
                  -> m ((Position, Rotation), Bool)
 computeMoveBoard br mv = do
-    fd <- br^.field
-    frz <- freeze fd :: m (Array Position Bool)
+    frz <- freeze (br^.field) :: m (Array Position Bool)
     return $ computeMove frz (fieldSize br) (kickTable br) (br^.piece) (br^.pieceState) mv
 
 makeMoveBoard :: BoardConstraint ma ia m => Move -> Board ma ia m -> m (Board ma ia m, Bool)
@@ -238,29 +247,21 @@ makeMoveBoard m b = do
 
 -- locks the tetrimino in-place
 -- doesn't check for anything
-lock :: BoardConstraint ma ia m => Board ma ia m -> m (Board ma ia m)
+lock :: BoardConstraint ma ia m => Board ma ia m -> m ()
 lock b = do
-    f <- b^.field
+    let f = b^.field
     let (x0, y0) = b^.piecePosition
-    let r = foldM (\brd (x, y) -> if psh ! (x, y) then do
-                if inRange ((0,0), fieldSize b & both %~ pred) (x+x0,y+y0) then do
-                    writeArray brd (x+x0,y+y0) True -- set block
-                    return brd
-                else
-                    return brd
-            else
-                return brd)  -- starting at the original board
-            f
-            (range $ bounds psh)  -- for each block in the piece
-    return $ b & field .~ r
+    forM_ (indices psh)  -- for each block in the piece
+        (\(x,y)-> when (psh ! (x, y)) $ do
+            when (inRange ((0,0), fieldSize b & both %~ pred) (x+x0,y+y0)) $ do
+                writeArray f (x+x0,y+y0) True) -- set block
+    -- ? return $ b & field .~ f
     where psh = pieceShape (b^.piece) (b^.pieceRotation)
 
 lockState :: BoardConstraint ma ia m => StateT (Board ma ia m) m ()
 lockState = do
     b <- gets lock
-    b' <- lift b
-    put b'
-    return ()
+    lift b
 
 -- Inverts a move, ignoring no-ops. This is used for finesse searching
 invertMove :: (IArray a Bool, IArray ia Position)
@@ -323,14 +324,31 @@ invertMoveBoard  :: forall ma ia m. BoardConstraint ma ia m
                  -> Move
                  -> m [(Position, Rotation)]
 invertMoveBoard br mv = do
-    fd <- br^.field
-    frz <- freeze fd :: m (Array Position Bool)
+    frz <- freeze (br^.field) :: m (Array Position Bool)
     return $ invertMove frz (fieldSize br) (kickTable br) (br^.piece) (br^.pieceState) mv
 
 
 -- Conveniently packs this up into a StateT
 moveState :: BoardConstraint ma ia m => Move -> StateT (Board ma ia m) m ()
 moveState m = join $ gets (put <=< lift . (fst <$>) . makeMoveBoard m)
+
+detectLines :: (IArray ia Bool) => ia Position Bool -> [Int]
+detectLines fb = [ x |
+    let (xmax, ymax) = snd $ bounds fb,
+    x <- [0..xmax],
+    and [fb!(x,y) | y <- [0..ymax]]]
+
+clearLine :: forall m ma ia. BoardConstraint ma ia m => Board ma ia m -> m Int
+clearLine b = do
+    let (xs, ys) = fieldSize b
+    let f = b^.field
+    fb <- freeze f :: m (Array Position Bool)
+    let lns = detectLines fb
+    forM_ [y0 | y0 <- [0..ys-1], y0 `notElem` lns] (\y ->
+        forM_ [0..xs-1] (\x -> do
+            block <- readArray f (x,y)
+            writeArray f (x,y - length (filter (<y) lns)) block))
+    return (length lns) -- ?
 
 -- I'd really like to see somebody obfuscate this with lens!
 add (x, y) (u, v) = (x+u, y+v)

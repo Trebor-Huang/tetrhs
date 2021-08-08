@@ -11,6 +11,7 @@ import Control.Lens
 import Control.Monad.State
 import Control.Concurrent
 import Control.DeepSeq
+import Data.Map (Map, lookup)
 
 deriving instance (NFData Move)
 deriving instance (NFData Piece)
@@ -27,7 +28,7 @@ testEq :: (Eq a) => a -> a -> IO ()
 testEq a b | a == b = putStrLn "Passed."
            | otherwise = error "Unequal."
 
-board :: Board IOArray Array IO
+board :: IO (Board IOArray Array IO)
 board = emptyBoard 20 srs (10, 40)
 frozenBoard :: Array Position Bool
 frozenBoard = listArray ((0,0),(9,39)) (replicate 400 False)
@@ -42,20 +43,22 @@ printBoard = do
 
 -- ! Test 2
 operate :: IO ((), Board IOArray Array IO)
-operate = runStateT (do
-    sequence_ $ intersperse printBoard [
-            id %= spawnPiece PieceZ ((3,20), 0),
-            moveState MLeft,
-            moveState MDown,
-            moveState MSoft,
-            lockState,
-            id %= spawnPiece PieceT ((5,20), 0),
-            moveState MRRight,
-            moveState MDASLeft,
-            moveState MSoft,
-            moveState MRLeft
-        ]
-    printBoard) board
+operate = do
+    b <- board
+    runStateT (do
+        sequence_ $ intersperse printBoard [
+                id %= spawnPiece PieceZ ((3,20), 0),
+                moveState MLeft,
+                moveState MDown,
+                moveState MSoft,
+                lockState,
+                id %= spawnPiece PieceT ((5,20), 0),
+                moveState MRRight,
+                moveState MDASLeft,
+                moveState MSoft,
+                moveState MRLeft
+            ]
+        printBoard) b
 
 invCollatz :: [Int] -> [[Int]]
 invCollatz ms@(m:_) | m == 4         = [8:ms]
@@ -94,9 +97,9 @@ findRoute = bfsRoute ((0,0), (11,11)) grid (0,0)
 searchTest :: [((Position, Rotation), Bool)] -> [Maybe [Move]]
 searchTest = map (searchFinesse
         frozenBoard
-        (fieldSize board)
+        (10,40)
         ((-2,-2),(9,21))
-        (kickTable board)
+        (srs :: KickTable Array)
         standardMoves
         PieceZ
         ((4,20),0))
@@ -107,7 +110,7 @@ usefulFinesse :: (Piece, Piece) -> [(Piece, (Position, Rotation), [Move])]
 usefulFinesse (minBound, maxBound) =
     [ (pc, (pos, rot), moves) |
         pc <- range (minBound, maxBound),
-        let srch = searchFinesse frozenBoard (fieldSize board) ((-2,-2), (9,21)) (kickTable board) standardMoves
+        let srch = searchFinesse frozenBoard (10,40) ((-2,-2), (9,21)) (srs::KickTable Array) standardMoves
                 pc (guideLineSpawnPositions!pc,0),
         pos <- range ((-2,-2),(9,0)),
         rot <- [0,1,2,3],
@@ -119,13 +122,41 @@ usefulFinesse (minBound, maxBound) =
         endsWithSoftDrop (Just l) = last l == MSoft
         endsWithSoftDrop _ = False
 
+-- ! Test 9
+
+zspinBoard :: Array Position Bool
+zspinBoard = listArray ((0,0), (9,9))  -- 10x10, rotated
+    [x,x,x,o,o,o,o,o,o,o  --  +--> y
+    ,x,x,x,o,o,o,o,o,o,o  --  | 
+    ,x,x,x,o,o,o,o,o,o,o  --  x
+    ,x,x,x,x,o,o,o,o,o,o
+    ,o,o,x,o,o,o,o,o,o,o
+    ,x,o,o,o,o,o,o,o,o,o
+    ,x,x,x,o,o,o,o,o,o,o
+    ,x,x,x,o,o,o,o,o,o,o
+    ,x,x,x,o,o,o,o,o,o,o
+    ,x,x,x,o,o,o,o,o,o,o]
+    where
+        x = True
+        o = False
+
+testAllPlacements :: Piece -> Map ((Position, Rotation), Bool) [Move]
+testAllPlacements pc = allPlacements
+    zspinBoard
+    (10,10)
+    ((-2,-2),(10,10))
+    (srs :: KickTable Array)
+    standardMoves
+    pc
+    ((4,8), 0)
+
 main :: IO ()
 main = do
-    print $ searchTest [(((2,0), 1),True),(((2,0),1),False)]
+    operate
     benchMarks
 
 benchMarks :: IO ()
-benchMarks = defaultMain 
+benchMarks = defaultMain
     [
         bgroup "finesse"
             [
@@ -134,6 +165,7 @@ benchMarks = defaultMain
             ],
         bgroup "moves"
             [
-                
+                bench "Z Spin" $ nf testAllPlacements PieceZ,
+                bench "No Spin" $ nf testAllPlacements PieceI
             ]
     ]

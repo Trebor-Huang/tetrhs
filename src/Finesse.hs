@@ -6,6 +6,7 @@ import SearchAlgorithms
 import Data.Array.IArray
 import qualified Data.Map as Map
 import Control.Lens
+import Data.Maybe
 
 searchFinesse :: (IArray a Bool, IArray ia Position)
             => a Position Bool  -- frozen board
@@ -26,7 +27,7 @@ searchFinesse fb sz sr kt mv pc st
             locked' <- if m == MSoft then [True, False] else [False],
             b || locked']) (st, False)
 
-standardMoves = [MDASLeft, MDASRight, MRLeft, MRRight, MLeft, MRight, MSoft, MDown]
+standardMoves = [MRLeft, MRRight, MDASLeft, MDASRight, MLeft, MRight, MSoft, MDown]
 
 allPlacements :: (IArray a Bool, IArray ia Position)
             => a Position Bool  -- frozen board
@@ -36,5 +37,21 @@ allPlacements :: (IArray a Bool, IArray ia Position)
             -> [Move] -- available moves
             -> Piece
             -> (Position, Rotation) -- start state
-            -> Map.Map ((Position, Rotation), Bool) Move
-allPlacements fb sz sr kt mv pc st = Map.fromDistinctAscList undefined
+            -> Map.Map ((Position, Rotation), Bool) [Move]
+allPlacements fb sz sr kt mv pc st =
+    let srch = bfsRouteArray
+            (((sr^._1, 0), False), ((sr^._2, 3), True))
+            (\(s, locked)
+                -> [(m, (s', locked')) |
+                    not locked,
+                    m <- mv,
+                    let (s', b) = computeMove fb sz kt pc s m,
+                    locked' <- if m == MSoft then [True, False] else [False],
+                    b || locked'])
+            (st, False) in
+    Map.fromDistinctAscList
+    [((st', lk), fromJust mmvs) |
+        st' <- range ((sr^._1, 0), (sr^._2, 3)),
+        lk <- [False, True],
+        let mmvs = srch ! (st', lk),
+        isJust mmvs]
