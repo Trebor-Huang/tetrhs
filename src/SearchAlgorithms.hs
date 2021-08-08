@@ -8,7 +8,6 @@ import Control.Monad.State
 import Data.Array
 import Data.Array.IO
 import Data.Array.ST
-import Data.List
 import Data.STRef
 import Control.Monad.Loops
 import Data.Maybe
@@ -20,15 +19,6 @@ bfs :: (a -> Bool)
 bfs predicate a0 branch = filter predicate searchspace
     where
         searchspace = a0 : (branch =<< searchspace)
-
-dfs :: (a -> Bool)
-    -> a
-    -> (a -> [a])
-    -> [a]
-dfs predicate a0 branch = filter predicate searchspace
-    where
-        searchspace = a0 : concat (transpose $ branch <$> searchspace)
-        -- the only different thing here is we transpose
 
 memoST :: forall a b. (Ix a)
      => (a, a)    -- range of the argument memoized
@@ -49,11 +39,11 @@ memoST r f = unpack
             return a
 
 -- TODO profile bidirectional search
-bfsRoute :: forall a c. (Ix a)
+bfsRouteArray :: forall a c. (Ix a)
     => (a, a)  -- on a range of vertices of type a
     -> (a -> [(c, a)])  -- shows a list of connected vertices, c is the edge type
-    -> a -> a -> Maybe [c] -- finds a shortest route between two points
-bfsRoute (!r) f (!a) = (fetch!)
+    -> a -> Array a (Maybe [c]) -- finds a shortest route between two points
+bfsRouteArray (!r) f (!a) = fetch
     where
         unpack n = arr ! n
         arr = runSTArray compute
@@ -88,3 +78,7 @@ bfsRoute (!r) f (!a) = (fetch!)
                             rt <- route
                             trace (Just (c:rt)) a'
         fetch = listArray r $ map (trace (Just [])) (range r)
+
+bfsRoute r f a = (fetch!)
+    where
+        fetch = bfsRouteArray r f a 

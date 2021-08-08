@@ -37,6 +37,7 @@ library
   build-depends:
       array >=0.5
     , base >=4.7 && <5
+    , containers >=0.6
     , lens >=4.0
     , monad-loops >=0.4
     , mtl >=2.2
@@ -52,6 +53,7 @@ executable tetrhs-exe
   build-depends:
       array >=0.5
     , base >=4.7 && <5
+    , containers >=0.6
     , lens >=4.0
     , monad-loops >=0.4
     , mtl >=2.2
@@ -69,7 +71,9 @@ test-suite tetrhs-test
   build-depends:
       array >=0.5
     , base >=4.7 && <5
+    , containers >=0.6
     , criterion
+    , deepseq
     , lens >=4.0
     , monad-loops >=0.4
     , mtl >=2.2

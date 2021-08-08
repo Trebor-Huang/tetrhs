@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, StandaloneDeriving, DeriveAnyClass #-}
 import Board
 import ArrayData
 import SearchAlgorithms
@@ -10,6 +10,10 @@ import Criterion.Main
 import Control.Lens
 import Control.Monad.State
 import Control.Concurrent
+import Control.DeepSeq
+
+deriving instance (NFData Move)
+deriving instance (NFData Piece)
 
 tabulate :: (Ix a) => (a, a) -> String -> (a -> String) -> (a -> String) -> String
 tabulate b fname s f = intercalate "\n" [
@@ -25,6 +29,8 @@ testEq a b | a == b = putStrLn "Passed."
 
 board :: Board IOArray Array IO
 board = emptyBoard 20 srs (10, 40)
+frozenBoard :: Array Position Bool
+frozenBoard = listArray ((0,0),(9,39)) (replicate 400 False)
 
 printBoard :: StateT (Board IOArray Array IO) IO ()
 printBoard = do
@@ -59,7 +65,6 @@ invCollatz [] = error "Nothing to start with"
 
 -- ! Test 3
 bfsTest = bfs ((==21).head) [1] invCollatz
-dfsTest = dfs ((==16).head) [1] invCollatz
 
 -- ! Test 4
 weird :: (Int -> Int) -> Int -> Int
@@ -86,21 +91,49 @@ findRoute = bfsRoute ((0,0), (11,11)) grid (0,0)
 
 -- ! Test 7
 
-searchTest :: (Position, Rotation) -> IO ()
-searchTest s = do
-    f <- board^.field
-    fb <- freeze f :: IO (Array Position Bool)
-    print (searchFinesse
-        fb
+searchTest :: [((Position, Rotation), Bool)] -> [Maybe [Move]]
+searchTest = map (searchFinesse
+        frozenBoard
         (fieldSize board)
-        ((-2,-1),(9,21))
+        ((-2,-2),(9,21))
         (kickTable board)
         standardMoves
         PieceZ
-        ((4,20),0)
-        ((3,0),3))
+        ((4,20),0))
+
+-- ! Test 8
+
+usefulFinesse :: (Piece, Piece) -> [(Piece, (Position, Rotation), [Move])]
+usefulFinesse (minBound, maxBound) =
+    [ (pc, (pos, rot), moves) |
+        pc <- range (minBound, maxBound),
+        let srch = searchFinesse frozenBoard (fieldSize board) ((-2,-2), (9,21)) (kickTable board) standardMoves
+                pc (guideLineSpawnPositions!pc,0),
+        pos <- range ((-2,-2),(9,0)),
+        rot <- [0,1,2,3],
+        validPosition (10,40) frozenBoard pc (pos, rot),
+        let result = srch ((pos, rot), True),
+        endsWithSoftDrop result,
+        let (Just moves) = result]
+    where
+        endsWithSoftDrop (Just l) = last l == MSoft
+        endsWithSoftDrop _ = False
 
 main :: IO ()
 main = do
-    searchTest ((1,1),0)
-    return ()
+    print $ searchTest [(((2,0), 1),True),(((2,0),1),False)]
+    benchMarks
+
+benchMarks :: IO ()
+benchMarks = defaultMain 
+    [
+        bgroup "finesse"
+            [
+                bench "#1" $ nf searchTest [(((2,0), 1),True),(((2,0),1),False)],
+                bench "#2" $ nf usefulFinesse (PieceZ, PieceI)
+            ],
+        bgroup "moves"
+            [
+                
+            ]
+    ]

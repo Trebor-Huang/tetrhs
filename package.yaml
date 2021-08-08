@@ -25,6 +25,7 @@ dependencies:
 - lens >= 4.0
 - monad-loops >= 0.4
 - mtl >= 2.2
+- containers >= 0.6
 
 library:
   source-dirs: src
@@ -53,3 +54,4 @@ tests:
     dependencies:
     - tetrhs
     - criterion
+    - deepseq
