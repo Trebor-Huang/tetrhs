@@ -15,7 +15,7 @@ import GHC.Generics
 -- A convenient helper function to format and log
 -- usage : formatter `lg` object
 import System.IO.Unsafe (unsafePerformIO)
---lg f a = unsafePerformIO (print (f a)) `seq` a
+lg f a = unsafePerformIO (print (f a)) `seq` a
 --(!?) x y = if inRange (bounds x) y then x!y else error $ "Out of bounds: " ++ show y
 
 data Piece
@@ -45,14 +45,14 @@ pieceShape PieceS 0 = listArray ((0,0),(2,2)) [False,True,False,False,True,True,
 pieceShape PieceS 1 = listArray ((0,0),(2,2)) [False,False,False,False,True,True,True,True,False]
 pieceShape PieceS 2 = listArray ((0,0),(2,2)) [True,False,False,True,True,False,False,True,False]
 pieceShape PieceS 3 = listArray ((0,0),(2,2)) [False,True,True,True,True,False,False,False,False]
-pieceShape PieceJ 0 = listArray ((0,0),(2,2)) [False,True,False,False,True,False,False,True,True]
-pieceShape PieceJ 1 = listArray ((0,0),(2,2)) [False,False,False,True,True,True,True,False,False]
-pieceShape PieceJ 2 = listArray ((0,0),(2,2)) [True,True,False,False,True,False,False,True,False]
-pieceShape PieceJ 3 = listArray ((0,0),(2,2)) [False,False,True,True,True,True,False,False,False]
-pieceShape PieceL 0 = listArray ((0,0),(2,2)) [False,True,True,False,True,False,False,True,False]
-pieceShape PieceL 1 = listArray ((0,0),(2,2)) [False,False,False,True,True,True,False,False,True]
-pieceShape PieceL 2 = listArray ((0,0),(2,2)) [False,True,False,False,True,False,True,True,False]
-pieceShape PieceL 3 = listArray ((0,0),(2,2)) [True,False,False,True,True,True,False,False,False]
+pieceShape PieceL 0 = listArray ((0,0),(2,2)) [False,True,False,False,True,False,False,True,True]
+pieceShape PieceL 1 = listArray ((0,0),(2,2)) [False,False,False,True,True,True,True,False,False]
+pieceShape PieceL 2 = listArray ((0,0),(2,2)) [True,True,False,False,True,False,False,True,False]
+pieceShape PieceL 3 = listArray ((0,0),(2,2)) [False,False,True,True,True,True,False,False,False]
+pieceShape PieceJ 0 = listArray ((0,0),(2,2)) [False,True,True,False,True,False,False,True,False]
+pieceShape PieceJ 1 = listArray ((0,0),(2,2)) [False,False,False,True,True,True,False,False,True]
+pieceShape PieceJ 2 = listArray ((0,0),(2,2)) [False,True,False,False,True,False,True,True,False]
+pieceShape PieceJ 3 = listArray ((0,0),(2,2)) [True,False,False,True,True,True,False,False,False]
 pieceShape PieceT 0 = listArray ((0,0),(2,2)) [False,True,False,False,True,True,False,True,False]
 pieceShape PieceT 1 = listArray ((0,0),(2,2)) [False,False,False,True,True,True,False,True,False]
 pieceShape PieceT 2 = listArray ((0,0),(2,2)) [False,True,False,True,True,False,False,True,False]
@@ -70,8 +70,8 @@ pieceShape _ _ = error "Rotation state out of bound. You should `mod` 4 before p
     pieceShape p 0 = case p of
         PieceZ -> listArray ((0,0), (2,2)) [o,o,x,o,x,x,o,x,o]
         PieceS -> listArray ((0,0), (2,2)) [o,x,o,o,x,x,o,o,x]
-        PieceJ -> listArray ((0,0), (2,2)) [o,x,o,o,x,o,o,x,x]
-        PieceL -> listArray ((0,0), (2,2)) [o,x,x,o,x,o,o,x,o]
+        PieceL -> listArray ((0,0), (2,2)) [o,x,o,o,x,o,o,x,x]
+        PieceJ -> listArray ((0,0), (2,2)) [o,x,x,o,x,o,o,x,o]
         PieceT -> listArray ((0,0), (2,2)) [o,x,o,o,x,x,o,x,o]
         PieceO -> listArray ((0,0), (1,1)) [x,x,x,x]
         PieceI -> listArray ((0,0), (3,3)) [o,o,x,o,o,o,x,o,o,o,x,o,o,o,x,o]
@@ -135,25 +135,27 @@ showField f = intercalate "\n" $
     where
         (xmax, ymax) = snd $ bounds f
 
+showFieldWithActivePiece ::
+    IArray ia Bool => FrozenField ia -> Piece -> (Position, Rotation) -> String
+showFieldWithActivePiece fb pc st@((x0, y0), rot) =
+    intercalate "\n" $
+    [concat [showBlock (fb!(x,y)) (locate x y) | x <- [0..xmax]] | y <- [ymax,ymax-1..0]]
+    where
+        (xmax, ymax) = snd $ bounds fb
+        showBlock True _ = "##"
+        showBlock False True = "[]"
+        showBlock _ _ = "  "
+        locate x y =
+            let relpos = (x-x0, y-y0) in
+            let psh = pieceShape pc rot in
+            let bds = bounds psh in
+                inRange bds relpos && psh ! relpos
 
 -- TODO make this look better
 showBoard :: BoardConstraint ma ia m => Board ma ia m -> m String
 showBoard b = do
-    let array = b^.field
-    let (xmax, ymax) = fieldSize b
-    intercalate "\n" <$> mapM sequence
-        [[xo <$> readArray array (x, y) <*> return (shadow x y) | x <- [0..xmax-1]] | y <- [ymax-1,ymax-2..0]]
-        where
-            xo True _ = '*'
-            xo False True = 'o'
-            xo _ _ = ' '
-            (x0, y0) = b^.piecePosition
-
-            shadow x y =
-                let relpos = (x-x0, y-y0) in
-                let psh = pieceShape (b^.piece) (b^.pieceRotation) in
-                let bds = bounds psh in
-                inRange bds relpos && psh ! relpos
+    fb::Array Position Bool <- freeze (b^.field)
+    return $ showFieldWithActivePiece fb (b^.piece) (b^.pieceState)
 
 data Move = MLeft | MRight | MDown | MSoft | MDASLeft | MDASRight | MRLeft | MRRight | MRFlip
     deriving (Eq, Show, Enum, Ord, Ix, Read, Bounded, Generic)
@@ -171,15 +173,20 @@ validPosition f p ((x0, y0),r) = all
     (indices $ pieceShape p r)
 
 
-validBoardPosition :: forall ma ia m. (BoardConstraint ma ia m) => Board ma ia m -> m Bool
+validBoardPosition :: (BoardConstraint ma ia m) => Board ma ia m -> m Bool
 validBoardPosition b = do
-    frozenf <- freeze (b^.field) :: m (Array Position Bool)
+    frozenf::Array Position Bool <- freeze (b^.field)
     return (validPosition frozenf (b^.piece) (b^.pieceState))
 
 spawnPiece :: BoardConstraint ma ia m => Piece -> (Position, Rotation) -> Board ma ia m -> Board ma ia m
 spawnPiece pc s brd = brd
     & piece .~ pc
     & pieceState .~ s
+
+spawnPieceState :: BoardConstraint ma ia m => Piece -> (Position, Rotation) -> StateT (Board ma ia m) m ()
+spawnPieceState pc s = do
+    piece .= pc
+    pieceState .= s
 
 computeMove :: (IArray a Bool, IArray ia Position)
             => FrozenField a  -- frozen field
@@ -231,12 +238,12 @@ computeMove fb kt pc ((x0, y0), rot) m = do
                 packhead [] = (((x0, y0), rot), False)
 
 -- wrapper that packs the data up
-computeMoveBoard :: forall ma ia m. BoardConstraint ma ia m
+computeMoveBoard :: BoardConstraint ma ia m
                  => Board ma ia m
                  -> Move
                  -> m ((Position, Rotation), Bool)
 computeMoveBoard br mv = do
-    frz <- freeze (br^.field) :: m (Array Position Bool)
+    frz::Array Position Bool <- freeze (br^.field)
     return $ computeMove frz (kickTable br) (br^.piece) (br^.pieceState) mv
 
 makeMoveBoard :: BoardConstraint ma ia m => Move -> Board ma ia m -> m (Board ma ia m, Bool)
@@ -260,13 +267,13 @@ lockBoard b = do
         (\(x,y)-> when (psh ! (x, y)) $ do
             when (inRange ((0,0), fieldSize b & both %~ pred) (x+x0,y+y0)) $ do
                 writeArray f (x+x0,y+y0) True) -- set block
-    -- ? return $ b & field .~ f
     where psh = pieceShape (b^.piece) (b^.pieceRotation)
 
 lockState :: BoardConstraint ma ia m => StateT (Board ma ia m) m ()
 lockState = do
     b <- gets lockBoard
     lift b
+    piece .= PieceEmpty
 
 -- Inverts a move, ignoring no-ops. This is used for finesse searching
 invertMove :: (IArray a Bool, IArray ia Position)
@@ -322,49 +329,60 @@ _invertMove fb kt pc ((x0, y0), rot) mv =
                     (kt ! (pc, rot', rot, n))
                 pack n = (try n, rot')
 
-invertMoveBoard  :: forall ma ia m. BoardConstraint ma ia m
+invertMoveBoard  :: BoardConstraint ma ia m
                  => Board ma ia m
                  -> Move
                  -> m [(Position, Rotation)]
 invertMoveBoard br mv = do
-    frz <- freeze (br^.field) :: m (Array Position Bool)
+    frz::Array Position Bool <- freeze (br^.field)
     return $ invertMove frz (kickTable br) (br^.piece) (br^.pieceState) mv
-
 
 -- Conveniently packs this up into a StateT
 moveState :: BoardConstraint ma ia m => Move -> StateT (Board ma ia m) m ()
 moveState m = join $ gets (put <=< lift . (fst <$>) . makeMoveBoard m)
 
 detectLines :: (IArray ia Bool) => FrozenField ia -> [Int]
-detectLines fb = [ x |
+detectLines fb = [ y |
     let (xmax, ymax) = snd $ bounds fb,
-    x <- [0..xmax],
-    and [fb!(x,y) | y <- [0..ymax]]]
+    y <- [0..ymax],
+    and ([fb!(x,y) | x <- [0..xmax]])]
 
-clearLine :: (IArray ia Bool) => FrozenField ia -> FrozenField ia
-clearLine f = ixmap (bounds f) m f
+clearLine :: (IArray ia Bool) => FrozenField ia -> (FrozenField ia, Int)
+clearLine f = (ixmap bds (_2 %~ m) f  -- reindex the array, and overwrite the top rows
+        // [((x,y),False) | x <- [0..xmax], y <- [1+ymax - length lns..ymax]],
+        length lns)
     where
+        bds@((0,0), (xmax, ymax)) = bounds f
         lns = detectLines f
-        m (x, y) = (x, y - length (filter (<y) lns))
+        m y = min (estimate y y) ymax
+        estimate y0 y | y0-y == length (filter (<=y0) lns) = y0
+                      | otherwise = estimate (y+length (filter (<=y0) lns)) y
 
-clearLineBoard :: forall m ma ia. BoardConstraint ma ia m => Board ma ia m -> m Int
+clearLineBoard :: BoardConstraint ma ia m => Board ma ia m -> m Int
 clearLineBoard b = do
     let (xs, ys) = fieldSize b
     let f = b^.field
-    fb <- freeze f :: m (Array Position Bool)
+    fb::Array Position Bool <- freeze f
     let lns = detectLines fb
     forM_ [y0 | y0 <- [0..ys-1], y0 `notElem` lns] (\y ->
         forM_ [0..xs-1] (\x -> do
             block <- readArray f (x,y)
             writeArray f (x,y - length (filter (<y) lns)) block))
-    return (length lns) -- ?
+    forM_ [ys - length lns..ys-1] (\y ->
+        forM_ [0..xs-1] (\x -> writeArray f (x,y) False))
+    return (length lns)
+
+clearLineState :: BoardConstraint ma ia m => StateT (Board ma ia m) m Int
+clearLineState = do
+    b <- gets clearLineBoard
+    lift b
 
 isPC :: (IArray ia Bool) => FrozenField ia -> Bool
-isPC fb = not $ and $ elems fb
+isPC fb = not $ or $ elems fb
 
-isPCBoard :: forall ma ia m. BoardConstraint ma ia m => Board ma ia m -> m Bool
+isPCBoard :: BoardConstraint ma ia m => Board ma ia m -> m Bool
 isPCBoard b = do
-    fb <- freeze (b^.field) :: m (Array Position Bool)
+    fb::Array Position Bool <- freeze (b^.field)
     return $ isPC fb
 
 -- I'd really like to see somebody obfuscate this with lens!

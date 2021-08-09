@@ -7,11 +7,11 @@ import Data.Array.IO
 import Data.Array.IArray
 import Data.List
 import Criterion.Main
-import Control.Lens
 import Control.Monad.State
 import Control.Concurrent
 import Control.DeepSeq
 import Data.Map (Map, lookup)
+import PCFinder
 
 deriving instance (NFData Move)
 deriving instance (NFData Piece)
@@ -38,7 +38,7 @@ printBoard = do
     q <- gets showBoard  -- gets the IO action that accesses the IOArray
     r <- liftIO q      -- Computes the String
     liftIO $ putStrLn r  -- prints the string
-    liftIO $ putStrLn "----------------"
+    liftIO $ putStrLn "--------------------\x1B[H"
     liftIO $ threadDelay 300000
 
 -- ! Test 2
@@ -47,16 +47,28 @@ operate = do
     b <- board
     runStateT (do
         sequence_ $ intersperse printBoard [
-                id %= spawnPiece PieceZ ((3,20), 0),
+                spawnPieceState PieceZ ((3,20), 0),
                 moveState MLeft,
                 moveState MDown,
                 moveState MSoft,
                 lockState,
-                id %= spawnPiece PieceT ((5,20), 0),
+                void clearLineState,
+                spawnPieceState PieceT ((5,20), 0),
                 moveState MRRight,
                 moveState MDASLeft,
                 moveState MSoft,
-                moveState MRLeft
+                moveState MRLeft,
+                lockState,
+                void clearLineState,
+                spawnPieceState PieceI ((5,5), 0),
+                moveState MSoft,
+                lockState,
+                void clearLineState,
+                spawnPieceState PieceJ ((4,4),2),
+                moveState MDASRight,
+                moveState MSoft,
+                lockState,
+                void clearLineState
             ]
         printBoard) b
 
@@ -67,7 +79,7 @@ invCollatz ms@(m:_) | m == 4         = [8:ms]
 invCollatz [] = error "Nothing to start with"
 
 -- ! Test 3
-bfsTest = bfs ((==21).head) [1] invCollatz
+bfsTest = bfs ((==21).head) (const True) [1] invCollatz
 
 -- ! Test 4
 weird :: (Int -> Int) -> Int -> Int
@@ -148,9 +160,49 @@ testAllPlacements pc = allPlacements
     pc
     ((4,8), 0)
 
+-- ! Test 10
+
+pcBoard3 :: Array Position Bool
+pcBoard3 = listArray ((0,0), (9,9))  -- 10x10, rotated
+    [x,x,x,x,o,o,o,o,o,o  --  +--> y
+    ,x,x,x,x,o,o,o,o,o,o  --  | 
+    ,x,x,x,x,o,o,o,o,o,o  --  x
+    ,x,x,x,x,o,o,o,o,o,o
+    ,x,x,x,x,o,o,o,o,o,o
+    ,x,x,x,x,o,o,o,o,o,o
+    ,x,x,x,x,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o]
+    where
+        x = True
+        o = False
+
+pcBoard4 :: Array Position Bool
+pcBoard4 = listArray ((0,0), (9,9))  -- 10x10, rotated
+    [x,x,x,x,o,o,o,o,o,o  --  +--> y
+    ,x,x,x,x,o,o,o,o,o,o  --  | 
+    ,x,x,x,x,o,o,o,o,o,o  --  x
+    ,x,x,x,x,o,o,o,o,o,o
+    ,x,x,x,x,o,o,o,o,o,o
+    ,x,x,x,x,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o]
+    where
+        x = True
+        o = False
+
+pcTest :: (IArray fa0 Bool) => FrozenField fa0 -> [Piece] -> [[[Move]]]
+pcTest pcBoard = searchPC
+    pcBoard ((-2,-2),(10,10))
+    (srs::Array (Piece, Rotation, Rotation, Int) Position) standardMoves
+    (guideLineSpawnPositions//[(m, (4,5)) | m <- range (minBound, maxBound)])
+
 main :: IO ()
 main = do
-    operate
+    print $ pcTest pcBoard4 [PieceT, PieceT, PieceJ, PieceL]
     benchMarks
 
 benchMarks :: IO ()
@@ -165,5 +217,11 @@ benchMarks = defaultMain
             [
                 bench "Z Spin" $ nf testAllPlacements PieceZ,
                 bench "No Spin" $ nf testAllPlacements PieceI
+            ],
+        bgroup "PC"
+            [
+                bench "3x4" $ nf (pcTest pcBoard3) [PieceJ, PieceL, PieceT],
+                bench "4x4" $ nf (pcTest pcBoard4) [PieceT, PieceT, PieceJ, PieceL],
+                bench "prune" $ nf (pcTest pcBoard4) [PieceJ, PieceL, PieceT]
             ]
     ]

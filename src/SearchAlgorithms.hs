@@ -12,13 +12,18 @@ import Data.STRef
 import Control.Monad.Loops
 import Data.Maybe
 
-bfs :: (a -> Bool)
+bfs :: (a -> Bool) -- ^ Goal if evaluates to True
+    -> (a -> Bool) -- ^ Prune if evaluates to False
     -> a
     -> (a -> [a])
     -> [a]
-bfs predicate a0 branch = filter predicate searchspace
+bfs predicate prune a0 branch = filter predicate searchspace
     where
-        searchspace = a0 : (branch =<< searchspace)
+        -- An elegant solution
+        -- searchspace = a0 : (branch =<< searchspace)
+        -- However, this solution <<loop>>'s when the search is finite
+        searchspace = concat $ takeWhile (not.null) epochs
+        epochs = [a0] : map (\as -> [ a' | a <- as, prune a, a' <- branch a]) epochs
 
 memoST :: forall a b. (Ix a)
      => (a, a)    -- range of the argument memoized
@@ -61,7 +66,7 @@ bfsRouteArray (!r) f (!a) = fetch
                             let nodes = f a0  -- get the connected nodes
                             forM
                                 nodes
-                                (\(c, n) -> do 
+                                (\(c, n) -> do
                                     r <- readArray array n
                                     case r of
                                       Nothing -> do
@@ -81,4 +86,4 @@ bfsRouteArray (!r) f (!a) = fetch
 
 bfsRoute r f a = (fetch!)
     where
-        fetch = bfsRouteArray r f a 
+        fetch = bfsRouteArray r f a
