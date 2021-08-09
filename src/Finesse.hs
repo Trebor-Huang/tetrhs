@@ -3,9 +3,9 @@ module Finesse where
 
 import Board
 import SearchAlgorithms
+import Control.Lens
 import Data.Array.IArray
 import qualified Data.Map as Map
-import Control.Lens
 import Data.Maybe
 
 searchFinesse :: (IArray a Bool, IArray ia Position)

@@ -2,13 +2,11 @@
 module PCFinder where
 
 import Board
-import SearchAlgorithms
-import Data.Array.IArray
-import Data.Maybe
-import Control.Lens
 import Finesse
+import SearchAlgorithms
+import Control.Lens
+import Data.Array.IArray
 import qualified Data.Map as Map
-import GHC.IO
 
 -- The total number of blocks should be a multiple of the board width
 blockCount :: (IArray ia Bool) => FrozenField ia -> Int
@@ -50,6 +48,5 @@ searchPC fb sr kt mv sl pcs | chk = map (reverse . (^._1)) (bfs
         (lno, chk) = blockCountCheck fb pcs
         noOverspill :: IArray fa Bool => (a, FrozenField fa, b, Int) -> Bool
         noOverspill (_, fb, _, lno') =
-            and [
-                not $ or [ fb ! (x, y) | x <- [0..fst(snd(bounds fb))]]
+            and [not $ or [ fb ! (x, y) | x <- [0..fst(snd(bounds fb))]]
                 | y <- [lno'..snd(snd(bounds fb))]]

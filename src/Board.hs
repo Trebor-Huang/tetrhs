@@ -1,8 +1,11 @@
-{-# LANGUAGE FlexibleContexts, ConstraintKinds, RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE KindSignatures #-}
 module Board where
 
 import Control.Lens hiding (indices)
@@ -106,7 +109,6 @@ data Board ma ia (m :: * -> *) = Board {
 }
 makeLenses ''Board
 
--- TODO improve on this? profile!
 pieceState :: (BoardConstraint ma ia m) => Lens (Board ma ia m) (Board ma ia m) (Position, Rotation) (Position, Rotation)
 pieceState = lens
     (\b -> (b^.piecePosition, b^.pieceRotation))
@@ -151,11 +153,15 @@ showFieldWithActivePiece fb pc st@((x0, y0), rot) =
             let bds = bounds psh in
                 inRange bds relpos && psh ! relpos
 
--- TODO make this look better
 showBoard :: BoardConstraint ma ia m => Board ma ia m -> m String
 showBoard b = do
     fb::Array Position Bool <- freeze (b^.field)
     return $ showFieldWithActivePiece fb (b^.piece) (b^.pieceState)
+
+showBoardState :: BoardConstraint ma ia m => StateT (Board ma ia m) m String
+showBoardState = do
+    b <- get
+    (lift . showBoard) b
 
 data Move = MLeft | MRight | MDown | MSoft | MDASLeft | MDASRight | MRLeft | MRRight | MRFlip
     deriving (Eq, Show, Enum, Ord, Ix, Read, Bounded, Generic)
@@ -189,12 +195,12 @@ spawnPieceState pc s = do
     pieceState .= s
 
 computeMove :: (IArray a Bool, IArray ia Position)
-            => FrozenField a  -- frozen field
+            => FrozenField a  -- ^ frozen field
             -> KickTable ia
             -> Piece
             -> (Position, Rotation)
             -> Move
-            -> ((Position, Rotation), Bool)  -- (end state, moved?)
+            -> ((Position, Rotation), Bool)  -- ^ (end state, moved?)
 computeMove fb kt pc ((x0, y0), rot) m = do
     case m of
       MLeft -> tryMove (-1,0)
@@ -251,8 +257,7 @@ makeMoveBoard m b = do
     (state, res) <- computeMoveBoard b m
     return (b & pieceState .~ state, res)
 
--- locks the tetrimino in-place
--- doesn't check for anything
+-- | Locks the tetrimino in-place
 lock :: IArray a Bool => FrozenField a -> Piece -> (Position, Rotation) -> FrozenField a
 lock fb pc st@(p0, rot) = fb // [(pos `add` p0, True) |
     let psh = pieceShape pc rot,

@@ -3,14 +3,14 @@
 module SearchAlgorithms where
 -- Standalone module for searching
 
+import Control.Monad.Loops
 import Control.Monad.ST
 import Control.Monad.State
 import Data.Array
 import Data.Array.IO
 import Data.Array.ST
-import Data.STRef
-import Control.Monad.Loops
 import Data.Maybe
+import Data.STRef
 
 bfs :: (a -> Bool) -- ^ Goal if evaluates to True
     -> (a -> Bool) -- ^ Prune if evaluates to False
@@ -69,10 +69,10 @@ bfsRouteArray (!r) f (!a) = fetch
                                 (\(c, n) -> do
                                     r <- readArray array n
                                     case r of
-                                      Nothing -> do
-                                          writeArray array n (Just (a0, c))
-                                          return (Just n)
-                                      Just c' -> return Nothing))
+                                        Nothing -> do
+                                            writeArray array n (Just (a0, c))
+                                            return (Just n)
+                                        Just c' -> return Nothing))
                     writeSTRef neighref (catMaybes $ join new_neighbours))
             -- now we get a array of (previous node, last-step-taken)
             -- we just need to follow it to build up a complete route

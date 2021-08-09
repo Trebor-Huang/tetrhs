@@ -1,17 +1,19 @@
-{-# LANGUAGE FlexibleContexts, StandaloneDeriving, DeriveAnyClass #-}
-import Board
+{-# LANGUAGE FlexibleContexts, DeriveAnyClass, StandaloneDeriving#-}
 import ArrayData
-import SearchAlgorithms
+import Board
 import Finesse
-import Data.Array.IO
-import Data.Array.IArray
-import Data.List
-import Criterion.Main
-import Control.Monad.State
+import PCFinder
+import SearchAlgorithms
 import Control.Concurrent
 import Control.DeepSeq
+import Control.Monad.State
+import Criterion.Main
+import Data.Array.IArray
+import Data.Array.IO
+import Data.Array.Unboxed
+import Data.List
 import Data.Map (Map, lookup)
-import PCFinder
+import Data.Maybe
 
 deriving instance (NFData Move)
 deriving instance (NFData Piece)
@@ -135,7 +137,7 @@ usefulFinesse (minBound, maxBound) =
 
 -- ! Test 9
 
-zspinBoard :: Array Position Bool
+zspinBoard :: UArray Position Bool
 zspinBoard = listArray ((0,0), (9,9))  -- 10x10, rotated
     [x,x,x,o,o,o,o,o,o,o  --  +--> y
     ,x,x,x,o,o,o,o,o,o,o  --  | 
@@ -162,7 +164,7 @@ testAllPlacements pc = allPlacements
 
 -- ! Test 10
 
-pcBoard3 :: Array Position Bool
+pcBoard3 :: UArray Position Bool
 pcBoard3 = listArray ((0,0), (9,9))  -- 10x10, rotated
     [x,x,x,x,o,o,o,o,o,o  --  +--> y
     ,x,x,x,x,o,o,o,o,o,o  --  | 
@@ -178,7 +180,7 @@ pcBoard3 = listArray ((0,0), (9,9))  -- 10x10, rotated
         x = True
         o = False
 
-pcBoard4 :: Array Position Bool
+pcBoard4 :: UArray Position Bool
 pcBoard4 = listArray ((0,0), (9,9))  -- 10x10, rotated
     [x,x,x,x,o,o,o,o,o,o  --  +--> y
     ,x,x,x,x,o,o,o,o,o,o  --  | 
@@ -194,15 +196,38 @@ pcBoard4 = listArray ((0,0), (9,9))  -- 10x10, rotated
         x = True
         o = False
 
-pcTest :: (IArray fa0 Bool) => FrozenField fa0 -> [Piece] -> [[[Move]]]
-pcTest pcBoard = searchPC
+pcBoard5 :: UArray Position Bool
+pcBoard5 = listArray ((0,0), (9,9))  -- 10x10, rotated
+    [x,x,x,x,o,o,o,o,o,o  --  +--> y
+    ,x,x,x,x,o,o,o,o,o,o  --  | 
+    ,x,x,x,x,o,o,o,o,o,o  --  x
+    ,x,x,x,x,o,o,o,o,o,o
+    ,x,x,x,x,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o
+    ,o,o,o,o,o,o,o,o,o,o]
+    where
+        x = True
+        o = False
+
+pcTest :: (IArray fa0 Bool) => FrozenField fa0 -> [Piece] -> Maybe [[Move]]
+pcTest pcBoard pcs =  listToMaybe $ searchPC
     pcBoard ((-2,-2),(10,10))
     (srs::Array (Piece, Rotation, Rotation, Int) Position) standardMoves
     (guideLineSpawnPositions//[(m, (4,5)) | m <- range (minBound, maxBound)])
+    pcs
+
+makeBoard :: FrozenField Array -> IO (Board IOUArray Array IO)
+makeBoard fb = do
+    b <- thaw fb
+    let ((0,0),(x,y)) = bounds fb
+    bd <- board
+    return bd {_field=b, fieldSize=(x+1,y+1)}
 
 main :: IO ()
 main = do
-    print $ pcTest pcBoard4 [PieceT, PieceT, PieceJ, PieceL]
     benchMarks
 
 benchMarks :: IO ()
@@ -220,8 +245,11 @@ benchMarks = defaultMain
             ],
         bgroup "PC"
             [
-                bench "3x4" $ nf (pcTest pcBoard3) [PieceJ, PieceL, PieceT],
+                bench "3x4#1" $ nf (pcTest pcBoard3) [PieceZ, PieceT, PieceJ],
+                bench "3x4#2" $ nf (pcTest pcBoard3) [PieceJ, PieceL, PieceT],
                 bench "4x4" $ nf (pcTest pcBoard4) [PieceT, PieceT, PieceJ, PieceL],
-                bench "prune" $ nf (pcTest pcBoard4) [PieceJ, PieceL, PieceT]
+                bench "5x4" $ nf (pcTest pcBoard5) [PieceI, PieceT, PieceO, PieceZ, PieceL],
+                bench "prune#1" $ nf (pcTest pcBoard4) [PieceJ, PieceL, PieceT],
+                bench "prune#2" $ nf (pcTest zspinBoard) [PieceZ]
             ]
     ]
