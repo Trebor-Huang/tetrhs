@@ -26,6 +26,7 @@ dependencies:
 - monad-loops >= 0.4
 - mtl >= 2.2
 - containers >= 0.6
+- MonadRandom >= 0.1
 
 library:
   source-dirs: src

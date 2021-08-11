@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts, DeriveAnyClass, StandaloneDeriving#-}
 import ArrayData
+import Battle
 import Board
 import Finesse
 import PCFinder
@@ -12,11 +13,13 @@ import Data.Array.IArray
 import Data.Array.IO
 import Data.Array.Unboxed
 import Data.List
-import Data.Map (Map, lookup)
+import Data.Map (Map, lookup, fromList)
 import Data.Maybe
+import GHC.Float
 
 deriving instance (NFData Move)
 deriving instance (NFData Piece)
+deriving instance (NFData a, NFData c) => (NFData (SearchTree a c))
 
 tabulate :: (Ix a) => (a, a) -> String -> (a -> String) -> (a -> String) -> String
 tabulate b fname s f = intercalate "\n" [
@@ -31,7 +34,7 @@ testEq a b | a == b = putStrLn "Passed."
            | otherwise = error "Unequal."
 
 board :: IO (Board IOArray Array IO)
-board = emptyBoard 20 srs (10, 40)
+board = emptyBoard guideLineSpawnPositions srs (10, 40)
 frozenBoard :: Array Position Bool
 frozenBoard = listArray ((0,0),(9,39)) (replicate 400 False)
 
@@ -226,19 +229,47 @@ makeBoard fb = do
     bd <- board
     return bd {_field=b, fieldSize=(x+1,y+1)}
 
+-- ! Test 11
+holdTest1 = possibleSequences True [PieceI, PieceO, PieceJ] PieceEmpty
+holdTest2 = possibleSequences True [PieceI, PieceO, PieceJ] PieceT
+
+-- ! Test 12
+testTree :: SearchTree Char Int
+testTree = Leaf 'A' 1.0 1.0
+pruner = const True
+vert :: Char -> [(Int, Char)]
+vert a = [(i, toEnum (i + fromEnum a)) | i <- [1,2,3,10,11,12]]
+evaluation a = (int2Float (fromEnum a) - 81.1)**2 / 300
+next = heuristicSearchIter vert evaluation pruner
+trees = testTree : map next trees
+
+-- ! Test 13
+testNextMove = searchNext
+        ((-2,-2),(9,9))
+        (srs::Array (Piece, Rotation, Rotation, Int) Position)
+        (guideLineSpawnPositions//[(m, (4,5)) | m <- range (minBound, maxBound)])
+        standardMoves
+
+
+
 main :: IO ()
 main = do
+    print $ searchNext
+        ((-2,-2),(9,9))
+        (srs::Array (Piece, Rotation, Rotation, Int) Position)
+        (guideLineSpawnPositions//[(m, (4,5)) | m <- range (minBound, maxBound)])
+        standardMoves zspinBoard [PieceZ, PieceI, PieceO, PieceJ] 10
     benchMarks
 
 benchMarks :: IO ()
 benchMarks = defaultMain
     [
-        bgroup "finesse"
+        bgroup "Finesse"
             [
                 bench "#1" $ nf searchTest [(((2,0), 1),True),(((2,0),1),False)],
                 bench "#2" $ nf usefulFinesse (PieceZ, PieceI)
             ],
-        bgroup "moves"
+        bgroup "Moves"
             [
                 bench "Z Spin" $ nf testAllPlacements PieceZ,
                 bench "No Spin" $ nf testAllPlacements PieceI
@@ -251,5 +282,16 @@ benchMarks = defaultMain
                 bench "5x4" $ nf (pcTest pcBoard5) [PieceI, PieceT, PieceO, PieceZ, PieceL],
                 bench "prune#1" $ nf (pcTest pcBoard4) [PieceJ, PieceL, PieceT],
                 bench "prune#2" $ nf (pcTest zspinBoard) [PieceZ]
+            ],
+        bgroup "Holding"
+            [
+                bench "#1" $ nf (possibleSequences True [PieceI, PieceO, PieceJ]) PieceEmpty,
+                bench "#2" $ nf (possibleSequences True [PieceI, PieceO, PieceJ]) PieceT
+            ],
+        bgroup "Heuristic Search"
+            [
+                bench "Algorithm" $ nf (take 100) trees,
+                bench "Evaluation" $ nf naiveStack pcBoard4,
+                bench "Search" $ nf (testNextMove pcBoard4 (cycle [PieceI, PieceO, PieceJ, PieceL])) 1000
             ]
     ]
