@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Finesse where
 
+import ArrayData
 import Board
 import SearchAlgorithms
 import Control.Lens
@@ -47,9 +48,16 @@ allPlacements fb sr kt mv pc st =
                     locked' <- if m == MSoft then [True, False] else [False],
                     b || locked'])
             (st, False) in
-    Map.fromDistinctAscList
+    Map.mapKeysWith chooseShorter canonicalize $ Map.fromDistinctAscList
     [((st', lk), fromJust mmvs) |
         st' <- range ((sr^._1, 0), (sr^._2, 3)),
         lk <- [False, True],
         let mmvs = srch ! (st', lk),
         isJust mmvs]
+    where
+        chooseShorter l1 l2 | length l1 <= length l2 = l1
+                            | otherwise = l2
+        canonicalize ((pos, rot), lck) =
+            let (off, sid) = identicalStates pc rot in
+            let crot = canonicalState sid in
+                ((pos`sub`off, crot), lck)

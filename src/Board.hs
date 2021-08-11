@@ -103,7 +103,7 @@ data Board ma ia (m :: * -> *) = Board {
     _nextQueue :: ![Piece], -- Short enough I don't need a queue
     _holdable :: !Bool,
     _pendingAttack :: !Int,
-    spawnLine :: !Int, -- Just an approximate indication to compute the current danger
+    spawnPosition :: !(ia Piece Position),
     kickTable :: !(KickTable ia),
     fieldSize :: !Position
 }
@@ -114,8 +114,8 @@ pieceState = lens
     (\b -> (b^.piecePosition, b^.pieceRotation))
     (\b (p, r) -> b & piecePosition .~ p & pieceRotation .~ r)
 
-emptyBoard :: BoardConstraint ma ia m => Int -> KickTable ia -> (Int, Int) -> m (Board ma ia m)
-emptyBoard spawnLine kickTable fieldSize@(x, y) = do
+emptyBoard :: BoardConstraint ma ia m => ia Piece Position -> KickTable ia -> (Int, Int) -> m (Board ma ia m)
+emptyBoard spawnPosition kickTable fieldSize@(x, y) = do
     arr <- newArray ((0,0), (x-1,y-1)) False
     return Board {
         _field = arr,
@@ -126,7 +126,7 @@ emptyBoard spawnLine kickTable fieldSize@(x, y) = do
         _nextQueue = [],
         _holdable = False,
         _pendingAttack = 0,
-        spawnLine = spawnLine,
+        spawnPosition = spawnPosition,
         kickTable = kickTable,
         fieldSize = fieldSize
     }
@@ -242,6 +242,19 @@ computeMove fb kt pc ((x0, y0), rot) m = do
                     (pc, rot, rot', n) `add` (x0, y0)
                 packhead (n:ns) = ((try n, (rot + r) `mod` 4), True)
                 packhead [] = (((x0, y0), rot), False)
+
+computeMoves :: (IArray a Bool, IArray ia Position)
+    => FrozenField a  -- ^ frozen field
+    -> KickTable ia
+    -> Piece
+    -> (Position, Rotation)
+    -> [Move]
+    -> ((Position, Rotation), Bool)  -- ^ (end state, moved?)
+computeMoves fb kt pc st [] = (st, False)
+computeMoves fb kt pc st (m:ms) =
+    let (st', b) = computeMove fb kt pc st m in
+    let (st'', b') = computeMoves fb kt pc st' ms in
+        (st'', b || b')
 
 -- wrapper that packs the data up
 computeMoveBoard :: BoardConstraint ma ia m
