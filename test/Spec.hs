@@ -16,10 +16,12 @@ import Data.List
 import Data.Map (Map, lookup, fromList)
 import Data.Maybe
 import GHC.Float
+import Control.Monad.Loops
+import Control.Monad.ST
 
 deriving instance (NFData Move)
 deriving instance (NFData Piece)
-deriving instance (NFData a, NFData c) => (NFData (SearchTree a c))
+deriving instance (NFData a, NFData c) => (NFData (SearchTree s a c))
 
 tabulate :: (Ix a) => (a, a) -> String -> (a -> String) -> (a -> String) -> String
 tabulate b fname s f = intercalate "\n" [
@@ -35,7 +37,7 @@ testEq a b | a == b = putStrLn "Passed."
 
 board :: IO (Board IOArray Array IO)
 board = emptyBoard guideLineSpawnPositions srs (10, 40)
-frozenBoard :: Array Position Bool
+frozenBoard :: UArray Position Bool
 frozenBoard = listArray ((0,0),(9,39)) (replicate 400 False)
 
 printBoard :: StateT (Board IOArray Array IO) IO ()
@@ -215,11 +217,13 @@ pcBoard5 = listArray ((0,0), (9,9))  -- 10x10, rotated
         x = True
         o = False
 
+miniSpawnPosition = guideLineSpawnPositions//[(m, (4,5)) | m <- range (minBound, maxBound)]
+
 pcTest :: (IArray fa0 Bool) => FrozenField fa0 -> [Piece] -> Maybe [[Move]]
 pcTest pcBoard pcs =  listToMaybe $ searchPC
     pcBoard ((-2,-2),(10,10))
     (srs::Array (Piece, Rotation, Rotation, Int) Position) standardMoves
-    (guideLineSpawnPositions//[(m, (4,5)) | m <- range (minBound, maxBound)])
+    miniSpawnPosition
     pcs
 
 makeBoard :: FrozenField Array -> IO (Board IOUArray Array IO)
@@ -234,31 +238,43 @@ holdTest1 = possibleSequences True [PieceI, PieceO, PieceJ] PieceEmpty
 holdTest2 = possibleSequences True [PieceI, PieceO, PieceJ] PieceT
 
 -- ! Test 12
-testTree :: SearchTree Char Int
-testTree = Leaf 'A' 1.0 1.0
-pruner = const True
-vert :: Char -> [(Int, Char)]
-vert a = [(i, toEnum (i + fromEnum a)) | i <- [1,2,3,10,11,12]]
-evaluation a = (int2Float (fromEnum a) - 81.1)**2 / 300
-next = heuristicSearchIter vert evaluation pruner
-trees = testTree : map next trees
+runMove :: [Piece] -> [Move] -> FrozenField UArray -> IO (FrozenField UArray)
+runMove pcs@(pc:_) mvs fb = do
+    putStr "\x1B[2J\x1B[H"
+    putStrLn $ showField fb
+    putStrLn "--------------------"
+    print (naiveStack fb)
+    print mvs
+    threadDelay 0
+    let st = fst $ computeMoves fb
+            (srs::Array (Piece, Rotation, Rotation, Int) Position)
+            pc (guideLineSpawnPositions!pc,0) mvs
+    return $ fst $ clearLine $ lock fb pc st
+runMove _ _ fb = return fb
 
--- ! Test 13
-testNextMove = searchNext
-        ((-2,-2),(9,9))
+runSearch :: IArray ia Bool
+          => FrozenField ia
+          -> [Piece]
+          -> ST s (SearchTree s (FrozenField ia, [Piece]) [Move], [Move])
+runSearch fb pcs = do
+    searchMove
+        ((-2,-2), (9,30))
         (srs::Array (Piece, Rotation, Rotation, Int) Position)
-        (guideLineSpawnPositions//[(m, (4,5)) | m <- range (minBound, maxBound)])
-        standardMoves
+        standardMoves guideLineSpawnPositions pcs naiveStack 1000 1.5 fb
 
-
+sequenceSearch
+    :: FrozenField UArray
+    -> [Piece]
+    -> IO ()
+sequenceSearch fb [] = return ()
+sequenceSearch fb (pc:pcs) = do
+    (newTree, mvs) <- stToIO $ runSearch fb (pc:pcs)
+    fb' <- runMove (pc:pcs) mvs fb
+    sequenceSearch fb' pcs
 
 main :: IO ()
 main = do
-    print $ searchNext
-        ((-2,-2),(9,9))
-        (srs::Array (Piece, Rotation, Rotation, Int) Position)
-        (guideLineSpawnPositions//[(m, (4,5)) | m <- range (minBound, maxBound)])
-        standardMoves zspinBoard [PieceZ, PieceI, PieceO, PieceJ] 10
+    sequenceSearch frozenBoard $ cycle [PieceI, PieceO, PieceL, PieceT, PieceJ, PieceZ, PieceS]
     benchMarks
 
 benchMarks :: IO ()
@@ -287,11 +303,5 @@ benchMarks = defaultMain
             [
                 bench "#1" $ nf (possibleSequences True [PieceI, PieceO, PieceJ]) PieceEmpty,
                 bench "#2" $ nf (possibleSequences True [PieceI, PieceO, PieceJ]) PieceT
-            ],
-        bgroup "Heuristic Search"
-            [
-                bench "Algorithm" $ nf (take 100) trees,
-                bench "Evaluation" $ nf naiveStack pcBoard4,
-                bench "Search" $ nf (testNextMove pcBoard4 (cycle [PieceI, PieceO, PieceJ, PieceL])) 1000
             ]
     ]

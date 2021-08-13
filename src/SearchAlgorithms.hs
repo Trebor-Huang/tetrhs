@@ -9,14 +9,13 @@ module SearchAlgorithms where
 import Control.Monad.Loops
 import Control.Monad.ST
 import Control.Monad.State
-import Control.Monad.Random
 import Data.Array
 import Data.Array.IO
 import Data.Array.ST
 import Data.Maybe
 import Data.STRef
 import Data.Function
-import Control.Lens
+import Control.Lens hiding (children)
 import qualified Data.Map as Map
 import Data.List
 import GHC.Float
@@ -98,61 +97,74 @@ bfsRoute r f a = (fetch!)
     where
         fetch = bfsRouteArray r f a
 
--- TODO ST MONAD should be much faster
-data SearchTree a c =
-    Leaf {_node :: a, _totalVisit :: Float, _totalEstimation :: Float} |
-    Branch {_node :: a, _children :: Map.Map c (SearchTree a c), _totalVisit :: Float, _totalEstimation :: Float}
+data SearchTree s a c =
+    Leaf {_node :: !a, _estimations :: STRef s (Float, Float)} |
+    Branch {_node :: !a, _children :: Map.Map c (STRef s (SearchTree s a c)), _estimations :: STRef s (Float, Float)}
     deriving (Generic)
 makeLenses ''SearchTree
 
-instance (Show a, Show c, Ord c) => Show (SearchTree a c) where
-    show (Leaf n v e) = "[" ++ show n ++ "] (" ++ show e ++ "/" ++ show v ++ ")"
-    show (Branch n m v e) = "[" ++ show n ++ "] (" ++ show e ++ "/" ++ show v ++ ")"
-        ++ concat [ "\n+ " ++ show k ++ "\n|- " ++ intercalate "\n| " (lines (show (m Map.! k)))  | k <- Map.keys m]
-
-exploration :: Float
-exploration = 1.4142
-
-heuristicSearchIter :: (Ord c)
-    => (a -> [(c, a)])  -- ^ A list of connected vertices, `c` is the edge type.
-    -> (a -> Float)  -- ^ An evaluation function.
-    -> (a -> Bool)  -- ^ A pruning function. The branch is pruned when this returns False
-    -> SearchTree a c -> SearchTree a c
-heuristicSearchIter branches evaluate prune searchTree =
-    let (node, update) = selectNode searchTree in
-    let result = [ (c, a, evaluate a) | (c, a) <- branches node, prune a] in
-        update (Map.fromList [ (c, Leaf a 1 e) | (c, a, e) <- result],
-            sum (map (^._3) result),
-            int2Float $ length result)
+mctsIterate :: forall a c s. (Ord c)
+    => Float -- ^ Exploration parameter
+    -> (a -> [(c, a)])  -- ^ Branching
+    -> (a -> Bool)  -- ^ Pruning
+    -> (a -> Float)  -- ^ Evaluation
+    -> STRef s (SearchTree s a c) -> ST s ()
+mctsIterate parameter branch prune evaluate tree
+    = do
+        (nodes, leaf, leafvalue) <- choose tree
+        subtrees <- mapM
+                (\(c,a) -> do
+                    let e = evaluate a
+                    eref <- newSTRef (e,1)
+                    tref <- newSTRef (Leaf a eref)
+                    return (c, tref, e))
+                $ filter (prune . snd) $ branch leafvalue
+        writeSTRef leaf (Branch {
+            _node=leafvalue,
+            _children=Map.fromList [ (cval, tref) | (cval, tref, _) <- subtrees],
+            _estimations=last nodes})
+        forM_ nodes (\x -> do
+            modifySTRef' x (\(e,v) -> (e+sum(map (^._3) subtrees), v+int2Float(length subtrees))))
     where
-        -- could be better with zippers, but whatever, I'm going to use ST later anyway
-        selectNode :: (Ord c) => SearchTree a c -> (a, (Map.Map c (SearchTree a c), Float,Float) -> SearchTree a c)
-        selectNode (Leaf n v e) = (n, \(c',e',v') -> Branch n c' (v+v') (e+e'))
-        selectNode (Branch n c v e) =
-            let child = maximumBy (compare `on`
-                    (\k -> confidence v (c Map.! k ^.totalVisit) (c Map.! k ^.totalEstimation))) (Map.keys c) in
-            let (n', f) = selectNode (c Map.! child) in
-                (n', \(c', e',v') ->
-                    Branch n (Map.update (const $ Just $ f (c',e',v')) child c) (v+v') (e+e'))
+        choose :: STRef s (SearchTree s a c) -> ST s ([STRef s (Float, Float)], STRef s (SearchTree s a c), a)
+        choose treeref = do
+            tree <- readSTRef treeref
+            case tree of
+                Leaf {_node=a, _estimations=e} -> return ([e], treeref, a)
+                b@Branch {_children=c, _estimations=e} -> do
+                    let keys = Map.keys c
+                    total <- expTotal b keys
+                    Just promisingChild <- maximumByM (compare `onM` ucb b total) keys
+                    let subtree = c Map.! promisingChild
+                    (choices, leaf, a') <- choose subtree
+                    return (e:choices, leaf, a')
 
-        confidence :: Float -> Float -> Float -> Float
-        confidence v0 v e = e/v + exploration * sqrt (log v0 / v)
+        ucb parent total move = do
+            (_, v0) <- readSTRef $ parent^.estimations
+            child <- readSTRef $ (parent^.children) Map.! move
+            (e, v) <- readSTRef $ child^.estimations
+            return $ exp(e/v)/total + parameter * sqrt(log v0 / v)
 
-selectBest :: (Ord c) => SearchTree a c -> c
-selectBest Leaf {} = error "No choices searched yet!"
-selectBest Branch {_children=c} =
-    maximumBy
-        (compare `on`
-            (\k -> c Map.! k ^.totalEstimation / c Map.! k ^.totalVisit))
-        (Map.keys c)
+        expTotal parent keys = sum <$> forM keys (\k -> do
+            child <- readSTRef $ (parent^.children) Map.! k
+            (e,v) <- readSTRef $ child^.estimations
+            return $ exp(e/v))
 
-heuristicSearch :: (Ord c)
-    => (a -> [(c, a)])  -- ^ A list of connected vertices, `c` is the edge type.
-    -> (a -> Float)  -- ^ An evaluation function.
-    -> (a -> Bool)  -- ^ A pruning function. The branch is pruned when this returns False
-    -> a -- ^ Starting point
-    -> Int  -- ^ Search iteration count.
-    -> c
-heuristicSearch branches evaluate prune start iter
-    = selectBest (iterate' (heuristicSearchIter branches evaluate prune)
-        (Leaf start 1 (evaluate start))!!iter)
+chooseMove :: (Ord c) => SearchTree s a c -> ST s (Maybe c)
+chooseMove Leaf {} = return Nothing
+chooseMove Branch {_children=ch} = maximumByM (compare `onM` est) (Map.keys ch)
+    where
+        est c = do
+            child <- readSTRef $ ch Map.! c
+            (e, v) <- readSTRef $ child^.estimations
+            return $ e/v
+
+makeMove :: (Ord c) => c -> SearchTree s a c -> ST s (SearchTree s a c)
+makeMove c Leaf {} = error "No moves available."
+makeMove c Branch {_children=ch} = do -- TODO benchmark this
+    case Map.lookup c ch of
+      Nothing -> error "No such move."
+      Just subtree -> readSTRef subtree
+
+-- ｜ on, but with monads
+onM f g x y = f <$> g x <*> g y

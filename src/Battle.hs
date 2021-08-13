@@ -9,6 +9,9 @@ import Control.Lens
 import GHC.Float
 import qualified Data.Map as Map
 import Data.Maybe
+import Control.Monad.ST
+import Data.STRef
+import Control.Monad
 
 -- | Given board and piece state, returns whether spinning results in
 -- a T-Spin, by the tri-corner criterion.
@@ -45,40 +48,52 @@ possibleSequences True (pc':pcs) pc | pc /= PieceEmpty =
                     _ -> error "Impossible!"
 
 naiveStack :: (IArray ia Bool) => FrozenField ia -> Float
-naiveStack fb = exp (holePenalty + stackPenalty)
+naiveStack fb = -holePenalty-stackPenalty-meanHeight
     where
         ((0,0), (x0,y0)) = bounds fb
         stacks = map
-            (\x -> dropWhile not (map (\y -> fb!(x,y)) [x0,x0-1..0]))
-            [0..y0]
-        holePenalty = - int2Float (sum (map (length . filter not) stacks))
+            (\x -> dropWhile not (map (\y -> fb!(x,y)) [y0,y0-1..0]))
+            [0..x0]
+        holePenalty = int2Float $ sum (map (length . filter not) stacks)+1
         heights = map (int2Float . length) stacks
-        minHeight = foldr min (int2Float y0) heights
-        meanHeight = (sum heights - minHeight) / int2Float x0
-        minHeightContribution = (meanHeight - minHeight)**2
-        stackPenalty = - sqrt(
-            (sum (map ((**2) . (meanHeight-)) heights) - minHeightContribution)
-                / int2Float x0 )
+        meanHeight = sum heights / int2Float (x0+1)
+        heightDifferences [c] = []
+        heightDifferences (c1:c2:cs) = (c1-c2):heightDifferences (c2:cs)
+        heightDifferences [] = []
+        stackPenalty = sqrt(
+            sum (map ((**2) . (meanHeight-)) heights)
+                / int2Float (x0+1) )
+                    + sum (map (**2) $ heightDifferences heights) / int2Float (x0+1) +1
 
-searchNext :: forall ia ka sa. (IArray ia Bool, IArray ka Position, IArray sa Position)
-           => (Position, Position)  -- ^ Safe region
+searchMove :: forall ia ka sa s. (IArray ia Bool, IArray ka Position, IArray sa Position)
+           => (Position, Position) -- ^ Safe region
            -> KickTable ka
-           -> sa Piece Position
-           -> [Move] -- ^ Available moves
-           -> FrozenField ia
+           -> [Move]  -- ^ Available moves
+           -> sa Piece Position -- ^ Spawn position
            -> [Piece]
-           -> Int
-           -> [Move]
-searchNext sr kt sp mvs fb pcs = heuristicSearch transitions (naiveStack.fst) (const True) (fb,pcs)
+           -> (FrozenField ia -> Float)  -- ^ Evaluation
+           -> Int -- ^ Iteration count
+           -> Float -- ^ Exploration factor
+           -> FrozenField ia
+           -> ST s (SearchTree s (FrozenField ia, [Piece]) [Move], [Move])
+           -- TODO reuse the tree
+searchMove sr kt mvs sp pcs ev it ex fb = do
+    est <- newSTRef (ev fb, 1)
+    tree <- newSTRef (Leaf (fb,pcs) est)
+    replicateM_ it (mctsIterate ex branch (const True) (ev.fst) tree)
+    searchedTree <- readSTRef tree
+    Just m <- chooseMove searchedTree
+    subTree <- makeMove m searchedTree
+    return (subTree, m)
     where
-        transitions :: (FrozenField ia, [Piece])
-                    -> [([Move], (FrozenField ia, [Piece]))]
-        transitions (fb, []) = []
-        transitions (fb, pc:pcs) = mapMaybe (getNext pc pcs)
-                (Map.assocs $ allPlacements fb sr kt mvs pc (sp!pc, 0))
-
-        getNext :: Piece -> [Piece]
-                -> (((Position, Rotation), Bool), [Move])
-                -> Maybe ([Move], (FrozenField ia, [Piece]))
-        getNext pc pcs ((st, False), mvs) = Nothing
-        getNext pc pcs ((st, True), mvs) = Just (mvs, (fst $ clearLine $ lock fb pc st, pcs))
+        branch :: (FrozenField ia, [Piece]) -> [([Move], (FrozenField ia, [Piece]))]
+        branch (fb, []) = []
+        branch (fb, pc:pcs) = mapMaybe calculate $
+            Map.assocs (allPlacements fb sr kt mvs pc (sp ! pc,0))
+            where
+                calculate :: (((Position, Rotation), Bool), [Move])
+                          -> Maybe ([Move], (FrozenField ia, [Piece]))
+                calculate ((_,False),_) = Nothing
+                calculate ((st,True),mvs) = Just (mvs, (fb', pcs))
+                    where
+                        fb' = fst $ clearLine $ lock fb pc st

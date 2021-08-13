@@ -38,9 +38,9 @@ searchPC fb sr kt mv sl pcs | chk = map (reverse . (^._1)) (bfs
     ([], fb, pcs, lno)  -- Starting from (No move, Initial Board, Pieces)
     (\(mvs, fb, pcs, lno) ->
         case pcs of
-            (pc:pcs') -> [ ((movemap Map.! (st, True)):mvs, fb', pcs', lno-lno') |
+            (pc:pcs') -> [ (mvst:mvs, fb', pcs', lno-lno') |
                 let movemap = allPlacements fb sr kt mv pc (sl!pc,0),
-                (st, True) <- Map.keys movemap,
+                ((st, True), mvst) <- Map.assocs movemap,
                 let (fb', lno') = clearLine $ lock fb pc st]
             [] -> []))
                             | otherwise = []
